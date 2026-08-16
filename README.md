@@ -99,6 +99,16 @@ DSH Web（dsh web，桌面 / + 移动 /m）
 - 口令会短暂出现在首次导航 URL 中，随后由服务端 302 剥除；一次性令牌可作
   后续增强。
 
+## Release
+
+正式安装包发布在 [GitHub Releases](https://github.com/zhaoyilun/dsh-mobile/releases)，
+每个版本附带签名的 release APK。仓库只含源码与构建配置，**签名 keystore 永不提交**；
+自建 release 请按 [`dsh-mobile/android/key.properties.example`](dsh-mobile/android/key.properties.example)
+配置自己的签名。
+
+> 如果手机上已经装过 debug 签名版本，安装 release APK 前需要先卸载旧版
+> （debug 与 release 签名不同，Android 不允许覆盖安装）。
+
 ## License
 
 [MIT](LICENSE)。其中 `deepseek-harness/` 保留其自身的 MIT 版权声明。
