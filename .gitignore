@@ -2,11 +2,14 @@
 .DS_Store
 Thumbs.db
 
-# Node / pnpm
-node_modules/
+# Node / pnpm (scoped to the harness checkout; Flutter uses lib/ as source)
+deepseek-harness/node_modules/
+deepseek-harness/**/node_modules/
+deepseek-harness/lib/
+deepseek-harness/**/lib/
+deepseek-harness/dist/
+deepseek-harness/**/dist/
 .pnpm-store/
-lib/
-dist/
 *.tsbuildinfo
 pnpm-debug.log
 .turbo/
