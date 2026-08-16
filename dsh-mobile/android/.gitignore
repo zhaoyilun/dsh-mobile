@@ -1,8 +1,6 @@
-gradle-wrapper.jar
+# Gradle wrapper is committed so the repo builds without `flutter create`.
 /.gradle
 /captures/
-/gradlew
-/gradlew.bat
 /local.properties
 GeneratedPluginRegistrant.java
 .cxx/
