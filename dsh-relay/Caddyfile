@@ -1,0 +1,10 @@
+# Caddyfile — automatic HTTPS edge for dsh-cloud-relay.
+#
+# {$DOMAIN} is substituted by Caddy from the DOMAIN environment variable
+# (set by docker compose from .env). Caddy's reverse_proxy terminates TLS,
+# proxies HTTP and transparently handles WebSocket upgrades (the /tunnel
+# keepalive, DSH's /api/events.mux and /api/events.host) — no extra config is
+# needed for WebSocket.
+{$DOMAIN} {
+	reverse_proxy 127.0.0.1:8090
+}

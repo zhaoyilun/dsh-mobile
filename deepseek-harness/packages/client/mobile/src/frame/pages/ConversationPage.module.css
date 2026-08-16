@@ -1,0 +1,44 @@
+/* Mobile conversation home: the embedded desktop column only. Narrow-screen
+   adaptation touches ONLY this package and every override is scoped under
+   [data-mobile-shell], so the desktop column is untouched. The desktop
+   conversation reads its geometry from CSS variables declared on its own root;
+   the mobile wrapper re-declares them for the phone viewport. */
+
+.page {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1;
+}
+
+.column {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Narrow-screen conversation adaptation: content width, composer clearance
+   (the input card stays content + 32px, which equals the viewport minus the
+   16px side paddings), and a one-notch-smaller markdown body — the desktop
+   markdown font rides --dsw-font-markdown-base tokens, re-declared here for
+   the phone viewport. */
+[data-mobile-shell] [data-phase] {
+  --dsh-chat-content-width: min(calc(100vw - 32px), 748px);
+  --dsw-font-markdown-base: 15px/26px var(--dsw-font-family);
+  --dsw-font-markdown-base-strong: 600 15px/26px var(--dsw-font-family);
+  --dsw-font-markdown-base-italic: italic 15px/26px var(--dsw-font-family);
+  --dsw-font-markdown-base-strong-italic: italic 600 15px/26px var(--dsw-font-family);
+}
+
+/* Code fences scroll horizontally instead of stretching the message column. */
+[data-mobile-shell] [data-phase] pre {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+/* The composer card clears the iPhone home-indicator area (the seat is the
+   sticky bottom row of the embedded column). */
+[data-mobile-shell] [data-composer-seat] {
+  padding-bottom: env(safe-area-inset-bottom);
+}

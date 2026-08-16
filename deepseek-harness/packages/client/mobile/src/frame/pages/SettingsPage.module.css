@@ -1,0 +1,100 @@
+/* Mobile settings page: connection/identity card, session-feature actions,
+   about, and the shared back bar. */
+
+.page {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1;
+  overflow-y: auto;
+}
+
+.card {
+  margin: 4px 16px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 12px;
+  background: var(--dsw-alias-bg-layer-1);
+  overflow: hidden;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px;
+}
+
+.row + .row {
+  border-top: 1px solid var(--dsw-alias-border-l2);
+}
+
+.rowLabel {
+  font-size: 14px;
+  line-height: 20px;
+}
+
+.rowValue {
+  font-size: 14px;
+  line-height: 20px;
+  color: var(--dsw-alias-label-tertiary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rowValue[data-connected] {
+  color: var(--dsw-alias-status-success);
+}
+
+/* Navigable feature rows (plan/goal) with a title + one-line explanation. */
+.action {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 12px 16px;
+  border: none;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.action + .action {
+  border-top: 1px solid var(--dsw-alias-border-l2);
+}
+
+.actionText {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.actionTitle {
+  font-size: 14px;
+  line-height: 20px;
+}
+
+.actionHint {
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.chevron {
+  flex: none;
+  font-size: 18px;
+  line-height: 20px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.about {
+  padding: 16px;
+  margin: 0;
+  font-size: 13px;
+  line-height: 20px;
+  color: var(--dsw-alias-label-tertiary);
+}

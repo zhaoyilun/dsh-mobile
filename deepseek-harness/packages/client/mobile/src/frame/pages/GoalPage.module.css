@@ -1,0 +1,20 @@
+/* Mobile goal page: reused desktop goal strip under the shared back bar. */
+
+.page {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1;
+}
+
+.body {
+  padding: 4px 16px;
+}
+
+.hint {
+  padding: 12px 16px;
+  margin: 0;
+  font-size: 13px;
+  line-height: 20px;
+  color: var(--dsw-alias-label-tertiary);
+}

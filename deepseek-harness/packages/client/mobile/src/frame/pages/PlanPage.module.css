@@ -1,0 +1,40 @@
+/* Mobile plan page: status card + guidance under the shared back bar. */
+
+.page {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1;
+}
+
+.card {
+  margin: 4px 16px;
+  padding: 16px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 12px;
+  background: var(--dsw-alias-bg-layer-1);
+}
+
+.status {
+  font-size: 15px;
+  line-height: 20px;
+  font-weight: 500;
+}
+
+.status[data-active] {
+  color: var(--dsw-alias-state-business-primary);
+}
+
+.pending {
+  margin: 8px 0 0;
+  font-size: 13px;
+  color: var(--dsw-alias-label-caption);
+}
+
+.hint {
+  padding: 12px 16px;
+  margin: 0;
+  font-size: 13px;
+  line-height: 20px;
+  color: var(--dsw-alias-label-tertiary);
+}

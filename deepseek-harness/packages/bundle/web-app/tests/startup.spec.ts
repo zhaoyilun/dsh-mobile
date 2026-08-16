@@ -1,0 +1,164 @@
+/**
+ * The Web command-line provider over a real Loader tree: its ordinary service
+ * releases a consumer whose config reads `ctx.webStartup` directly.
+ */
+
+import { mkdtempSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { pathToFileURL } from 'node:url'
+import { Context } from '@deepseek-ai/cordis'
+import Loader from '@deepseek-ai/cordis-plugin-loader'
+import Include from '@deepseek-ai/cordis-plugin-include'
+import { internals, provideCmdline } from '@deepseek-ai/dsh-cmdline'
+import { afterEach, describe, expect, it } from 'vitest'
+import { apply, WEB_STARTUP_SERVICE, type WebStartupValues } from '../src/startup.ts'
+
+/** What one fixture boot observed. */
+interface Observed {
+  exits: number[]
+  out: string
+  readerConfig?: unknown
+}
+
+const disposers: (() => Promise<void>)[] = []
+
+afterEach(async () => {
+  for (const dispose of disposers.splice(0)) await dispose()
+  internals.stdout = process.stdout
+  internals.stderr = process.stderr
+})
+
+/**
+ * Mount the real provider and a consumer using injection-ordered config.
+ * @param args - the invocation's inner arguments.
+ * @returns the service value and observed consumer/process effects.
+ */
+async function bootProvider(args: string[]): Promise<{
+  values: WebStartupValues | undefined
+  observed: Observed
+}> {
+  const dir = mkdtempSync(join(tmpdir(), 'dsh-web-startup-'))
+  const observed: Observed = { exits: [], out: '' }
+  writeFileSync(join(dir, 'reader.mjs'), `
+export function apply(_ctx, config) { globalThis.__webStartupObserved.readerConfig = config }
+`)
+  // Node imports the fixture row outside Vite's source resolver, so delegate
+  // to the source-plane plugin already imported by this test.
+  writeFileSync(join(dir, 'provider.mjs'), `
+export const name = 'web-startup'
+export const inject = ['cmdlineArgs']
+export const apply = ctx => globalThis.__webStartupApply(ctx)
+`)
+  writeFileSync(join(dir, 'cordis.yml'), [
+    '- id: reader',
+    `  name: ${pathToFileURL(join(dir, 'reader.mjs')).href}`,
+    `  inject: [${WEB_STARTUP_SERVICE}]`,
+    '  config:',
+    "    host: !!js ctx.webStartup.host ?? '127.0.0.1'",
+    '    port: !!js ctx.webStartup.port ?? 3080',
+    '    trustedHosts: !!js ctx.webStartup.trustedHosts',
+    '    webToken: !!js ctx.webStartup.webToken',
+    '- id: provider',
+    `  name: ${pathToFileURL(join(dir, 'provider.mjs')).href}`,
+    '',
+  ].join('\n'))
+  const observing = { write: (chunk: string) => { observed.out += chunk; return true } }
+  internals.stdout = observing
+  internals.stderr = observing
+  const globals = globalThis as unknown as {
+    __webStartupApply: typeof apply
+    __webStartupObserved: Observed
+  }
+  globals.__webStartupApply = apply
+  globals.__webStartupObserved = observed
+
+  const ctx = new Context()
+  await ctx.plugin(Loader)
+  ctx.loader.builtins.include = Include
+  provideCmdline(ctx, { args, exit: code => void observed.exits.push(code) })
+  await ctx.loader.create({ name: 'cordis:include', config: { path: pathToFileURL(join(dir, 'cordis.yml')).href } })
+  await ctx.loader.await()
+  disposers.push(async () => { await ctx.fiber.dispose() })
+  return {
+    values: ctx.get(WEB_STARTUP_SERVICE) as WebStartupValues | undefined,
+    observed,
+  }
+}
+
+describe('web command-line provider', () => {
+  it('publishes each flag and releases direct service expressions', async () => {
+    const { values, observed } = await bootProvider([
+      '--host', '127.0.0.1',
+      '--port', '8080',
+      '--trusted-host', 'lab.internal', 'lab-2.internal',
+      '--trusted-host', '10.0.0.9',
+      '--web-token', 'cli-secret',
+    ])
+    expect(values).toEqual({
+      host: '127.0.0.1',
+      port: 8080,
+      trustedHosts: ['lab.internal', 'lab-2.internal', '10.0.0.9'],
+      webToken: 'cli-secret',
+    })
+    expect(observed.readerConfig).toEqual(values)
+    expect(observed.exits).toEqual([])
+  })
+
+  it('leaves deployment values to each consumer when flags omit them', async () => {
+    const { values, observed } = await bootProvider([])
+    expect(values).toEqual({ trustedHosts: [] })
+    expect(observed.readerConfig).toEqual({
+      host: '127.0.0.1',
+      port: 3080,
+      trustedHosts: [],
+    })
+  })
+
+  it('prints its own help and leaves the consumer pending', async () => {
+    const { values, observed } = await bootProvider(['--help'])
+    expect(observed.out).toContain('dsh --profile web')
+    expect(observed.out).toContain('--trusted-host')
+    expect(observed.out).toContain('--web-token')
+    expect(values).toBeUndefined()
+    expect(observed.readerConfig).toBeUndefined()
+    expect(observed.exits).toEqual([0])
+  })
+
+  it('falls back to DSH_WEB_TOKEN with the CLI flag winning, and treats empty env as unset', async () => {
+    const previous = process.env.DSH_WEB_TOKEN
+    try {
+      process.env.DSH_WEB_TOKEN = 'env-secret'
+      expect((await bootProvider(['--web-token', 'cli-secret'])).values?.webToken).toBe('cli-secret')
+      expect((await bootProvider([])).values?.webToken).toBe('env-secret')
+      expect((await bootProvider([])).values).toEqual({ trustedHosts: [], webToken: 'env-secret' })
+      process.env.DSH_WEB_TOKEN = ''
+      expect((await bootProvider([])).values?.webToken).toBeUndefined()
+    } finally {
+      if (previous === undefined) delete process.env.DSH_WEB_TOKEN
+      else process.env.DSH_WEB_TOKEN = previous
+    }
+  })
+
+  it('rejects a non-numeric port before the consumer activates', async () => {
+    const { values, observed } = await bootProvider(['--port', 'abc'])
+    expect(observed.out).toContain('--port must be a number')
+    expect(values).toBeUndefined()
+    expect(observed.readerConfig).toBeUndefined()
+    expect(observed.exits).toEqual([1])
+  })
+
+  it('rejects the all-interfaces host without a configured token before the consumer activates', async () => {
+    const { values, observed } = await bootProvider(['--host', '0.0.0.0'])
+    expect(observed.out).toContain('--host 0.0.0.0 requires authentication: pass --web-token <token> or set DSH_WEB_TOKEN before binding all interfaces')
+    expect(values).toBeUndefined()
+    expect(observed.readerConfig).toBeUndefined()
+    expect(observed.exits).toEqual([1])
+  })
+
+  it('accepts the all-interfaces host when a token is configured', async () => {
+    const { values } = await bootProvider(['--host', '0.0.0.0', '--web-token', 'lan-secret'])
+    expect(values?.host).toBe('0.0.0.0')
+    expect(values?.webToken).toBe('lan-secret')
+  })
+})

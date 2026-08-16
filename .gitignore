@@ -1,0 +1,43 @@
+# OS
+.DS_Store
+Thumbs.db
+
+# Node / pnpm
+node_modules/
+.pnpm-store/
+lib/
+dist/
+*.tsbuildinfo
+pnpm-debug.log
+.turbo/
+
+# Flutter / Dart
+build/
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+android/local.properties
+android/key.properties
+android/.gradle/
+android/.kotlin/
+ios/Flutter/Generated.xcconfig
+ios/Flutter/flutter_export_environment.sh
+ios/Flutter/ephemeral/
+
+# Go / relay artifacts
+dsh-relay/dist/
+dsh-relay/.env
+
+# Secrets and local archives
+*.tar.gz
+.env
+.env.*
+!.env.example
+
+# Local working notes / caches / unrelated reference projects
+briefs/
+reference/
+.dsh-test-home/
+.gocache/
+.gradle-home/
+.DS_Store

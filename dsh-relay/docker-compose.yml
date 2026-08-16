@@ -1,0 +1,40 @@
+# One-command deployment: cloud-relay behind a Caddy automatic-HTTPS edge.
+#
+#   cp .env.example .env   # fill in DOMAIN / TUNNEL_TOKEN / PHONE_PASS
+#   docker compose up -d --build
+#
+# cloud-relay listens inside its own network namespace on :8090 and is only
+# published on the host loopback (127.0.0.1:8090). Caddy runs on the host
+# network so its Caddyfile ("reverse_proxy 127.0.0.1:8090") reaches the relay
+# on loopback, and it terminates TLS for ${DOMAIN} with automatic certificates.
+services:
+  cloud-relay:
+    build: .
+    restart: unless-stopped
+    environment:
+      TUNNEL_TOKEN: ${TUNNEL_TOKEN:?set TUNNEL_TOKEN in .env (openssl rand -hex 24)}
+      PHONE_PASS: ${PHONE_PASS:?set PHONE_PASS in .env (openssl rand -hex 24)}
+    ports:
+      - "127.0.0.1:8090:8090"
+    networks:
+      - relay
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    network_mode: host # so "reverse_proxy 127.0.0.1:8090" in the Caddyfile works
+    environment:
+      DOMAIN: ${DOMAIN:?set DOMAIN in .env, e.g. relay.example.com}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - cloud-relay
+
+networks:
+  relay:
+
+volumes:
+  caddy_data:
+  caddy_config:

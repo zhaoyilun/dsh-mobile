@@ -1,0 +1,3 @@
+- insert:
+    - id: mobile-static
+      name: './index.js'

@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  DSH 移动壳网络安全配置。
+
+  局域网直连需要明文 HTTP(如 http://192.168.1.5:3080),因此 base-config
+  允许 cleartextTraffic;公网中继请务必使用 https,避免令牌与 cookie 在
+  公网明文传输。
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system"/>
+        </trust-anchors>
+    </base-config>
+</network-security-config>
