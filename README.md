@@ -27,6 +27,17 @@ Tailscale/ZeroTier 等解决的是「设备之间如何安全组网、相互可�
 两者可以叠加使用：Tailscale 负责把多台设备组进一个私有网，本项目则提供手机到
 DSH 的专属入口与移动端体验。
 
+## 图标
+
+仓库图标是一只**正在玩手机的鲸**：在 DeepSeek Harness 鲸鱼徽标的基础上，前景加入
+一台带聊天气泡的手机。主 SVG 在 [`assets/dsh-mobile-icon.svg`](assets/dsh-mobile-icon.svg)，
+并由它生成：
+
+- Android 旧版 launcher + Android 8+ 自适应图标（含透明 foreground）；
+- iOS AppIcon 全套尺寸；
+- 移动 Web `/m` 的 PWA 图标；
+- Android 系统通知栏的白色鲸鱼小图标。
+
 ## 完整一套包含什么
 
 | 目录 | 作用 |
