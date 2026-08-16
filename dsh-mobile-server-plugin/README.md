@@ -4,13 +4,11 @@
 桌面端 `/` 完全不动。插件体积很小，可通过 profile patch 热插入到 `dsh web`，
 不需要重启 DSH 本体。
 
-## 必需环境变量
+## 配置移动端 dist 路径
 
-`mobile-static` 不猜测任何机器路径，启动前必须显式指定移动前端构建产物：
-
-```bash
-export DSH_MOBILE_DIST_INDEX=/absolute/path/deepseek-harness/apps/mobile/dist/index.html
-```
+插件优先读取 patch 里的 `config.distIndex`（推荐，冷启动稳定）；也可以退而使用
+环境变量 `DSH_MOBILE_DIST_INDEX`。两者都没有时插件保持休眠，`dsh web` 照常启动，
+不会拖垮整个 harness。
 
 `dist/` 由以下命令生成：
 
@@ -30,12 +28,13 @@ pnpm --filter @deepseek-ai/dsh-mobile-frontend build
       name: /absolute/path/dsh-mobile-server-plugin/index.js
       config:
         revision: 1
+        distIndex: /absolute/path/deepseek-harness/apps/mobile/dist/index.html
 ```
 
-启动方式（环境变量 + patch 同时生效）：
+之后普通启动即可，不需要任何临时 shell 环境变量：
 
 ```bash
-DSH_MOBILE_DIST_INDEX=/absolute/path/deepseek-harness/apps/mobile/dist/index.html dsh web
+dsh web
 ```
 
 改动 `index.js` 后把上面的 `revision` +1，profile watcher 会重新加载插件。
