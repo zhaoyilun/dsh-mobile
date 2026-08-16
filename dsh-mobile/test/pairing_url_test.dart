@@ -58,6 +58,28 @@ void main() {
     });
   });
 
+  group('buildMobileUrl · cookie 优先冷启动', () {
+    test('公网与局域网都只落到无凭据的 /m/', () {
+      const publicConfig = AppConfig(
+        mode: ConnectionMode.public,
+        serverUrl: 'https://relay.example.com/',
+        token: 'phone-pass',
+      );
+      final publicUrl = buildMobileUrl(publicConfig);
+      expect(publicUrl.toString(), 'https://relay.example.com/m/');
+      expect(publicUrl.hasQuery, isFalse);
+
+      const lanConfig = AppConfig(
+        mode: ConnectionMode.lan,
+        serverUrl: 'http://192.168.1.5:3080',
+        token: 'pair-token',
+      );
+      final lanUrl = buildMobileUrl(lanConfig);
+      expect(lanUrl.toString(), 'http://192.168.1.5:3080/m/');
+      expect(lanUrl.hasQuery, isFalse);
+    });
+  });
+
   group('buildPairingUrl · lan(局域网直连)', () {
     test('http 局域网 → /pair?token=<token>&next=/m/', () {
       const config = AppConfig(

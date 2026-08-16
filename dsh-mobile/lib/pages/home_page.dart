@@ -49,7 +49,7 @@ class HomePage extends StatefulWidget {
   State<HomePage> createState() => _HomePageState();
 }
 
-class _HomePageState extends State<HomePage> {
+class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   late final WebViewController _controller;
   Timer? _retryTimer;
 
@@ -70,6 +70,15 @@ class _HomePageState extends State<HomePage> {
 
   DateTime? _lastBlockedNoticeAt;
 
+  /// 切到后台的时刻;回前台时按停留时长决定是否刷新页面。
+  DateTime? _pausedAt;
+
+  /// cookie 失效后正在回退配对,避免 401 反复触发配对循环。
+  bool _pairingFallback = false;
+
+  /// 后台停留超过该时长后,回前台主动 reload,让会话/任务状态刷新。
+  static const _backgroundRefreshThreshold = Duration(minutes: 1);
+
   bool get _inErrorOverlay => _errorMessage != null;
 
   /// 与配置服务器同源(scheme/host/port 一致)的导航才放行。
@@ -78,17 +87,25 @@ class _HomePageState extends State<HomePage> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    // Android 前台保活服务:切后台后进程不会被轻易回收,WebSocket 与
+    // WebView 通知桥可以继续工作。
+    unawaited(SystemNotifications.startKeepAlive());
     _initController();
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _retryTimer?.cancel();
+    unawaited(SystemNotifications.stopKeepAlive());
     super.dispose();
   }
 
   void _initController() {
-    final pairingUrl = buildPairingUrl(widget.config);
+    // 冷启动优先直接进 /m/(会话凭据已在 HttpOnly cookie 里),收到
+    // 401/403 再回退到配对 URL;已配对手机不需要每次打开都重新校验口令。
+    final initialUrl = buildMobileUrl(widget.config);
     _controller = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
       // WebView 首帧前用原生壳底色,避免 Android 上先闪一帧刺眼白屏。
@@ -128,6 +145,7 @@ class _HomePageState extends State<HomePage> {
             setState(() => _status = _ConnStatus.loading);
           },
           onPageFinished: (url) {
+            _pairingFallback = false;
             if (_inErrorOverlay || !mounted) {
               return;
             }
@@ -157,22 +175,24 @@ class _HomePageState extends State<HomePage> {
           onHttpError: (error) {
             final status = error.response?.statusCode;
             final uri = error.request?.uri;
-            // 只认主文档级、服务端级(≥500)或网络层(statusCode 0/null)的
-            // 失败;4xx 是应用语义(配对过期等),由页面内处理。Android 会
-            // 提供请求 URL,以 URL 等价代替 isMainFrame;iOS 插件不提供
-            // request,而该回调来自导航响应,按主文档处理。
-            final serverLevel = status == null || status == 0 || status >= 500;
             final isDocument = uri == null
                 ? _documentUrl != null
                 : (_documentUrl != null && uri.toString() == _documentUrl);
             final sameOrigin = uri == null || _isSameOrigin(uri.toString());
+            // 401/403 表示 cookie 缺失或失效:先回退配对一次;配对 URL
+            // 本身再失败才判定为凭据错误。
+            if (isDocument && sameOrigin && (status == 401 || status == 403)) {
+              _onAuthRequired();
+              return;
+            }
+            final serverLevel = status == null || status == 0 || status >= 500;
             if (isDocument && serverLevel && sameOrigin) {
               _onLoadFailed('服务器错误(HTTP ${status ?? 0})');
             }
           },
         ),
       )
-      ..loadRequest(pairingUrl);
+      ..loadRequest(initialUrl);
   }
 
   /// 加载失败统一入口:还有剩余自动重试 → 排程重连;耗尽 → 错误页。
@@ -196,6 +216,81 @@ class _HomePageState extends State<HomePage> {
         _errorMessage = message;
       });
     }
+  }
+
+  /// 当前主文档 URL 是否携带配对凭据(pass/token)。配对 URL 自己返回
+  /// 401/403 时不再尝试回退,直接判定为凭据错误。
+  bool _urlHasCredential(String? url) {
+    final uri = Uri.tryParse(url ?? '');
+    if (uri == null) {
+      return false;
+    }
+    return uri.queryParameters.containsKey('pass') ||
+        uri.queryParameters.containsKey('token');
+  }
+
+  /// cookie 缺失/失效(401/403)时的回退:
+  /// 1. 普通 /m/ 页面 → 用配对 URL 重新拿一次会话;
+  /// 2. 配对 URL 本身 → 手机口令/配对令牌错误,展示错误页。
+  void _onAuthRequired() {
+    if (!mounted || _inErrorOverlay) {
+      return;
+    }
+    if (_pairingFallback) {
+      return;
+    }
+    final doc = _documentUrl;
+    if (_urlHasCredential(doc)) {
+      setState(() {
+        _status = _ConnStatus.error;
+        _errorMessage = '配对失败:手机口令或配对令牌不正确';
+      });
+      return;
+    }
+    _pairingFallback = true;
+    setState(() => _status = _ConnStatus.loading);
+    _controller.loadRequest(buildPairingUrl(widget.config)).catchError((_) {
+      if (mounted) {
+        _onLoadFailed('无法发起配对');
+      }
+    });
+  }
+
+  /// 后台停留超过阈值后回前台:reload 当前 /m/ 页面,让 SPA 重新拉取
+  /// 会话/任务状态。页面本身无凭据参数,reload 不会重复校验口令。
+  Future<void> _refreshAfterBackground() async {
+    if (!mounted || _inErrorOverlay) {
+      return;
+    }
+    final doc = _documentUrl;
+    try {
+      if (doc != null && !_urlHasCredential(doc)) {
+        await _controller.reload();
+      } else {
+        await _controller.loadRequest(buildMobileUrl(widget.config));
+      }
+    } catch (_) {
+      // 刷新失败保持旧页面;WebView 的网络错误回调会接管重连。
+    }
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.hidden) {
+      _pausedAt ??= DateTime.now();
+      return;
+    }
+    if (state != AppLifecycleState.resumed) {
+      return;
+    }
+    final pausedAt = _pausedAt;
+    _pausedAt = null;
+    if (pausedAt == null ||
+        DateTime.now().difference(pausedAt) < _backgroundRefreshThreshold) {
+      return;
+    }
+    unawaited(_refreshAfterBackground());
   }
 
   /// 判定 WebResourceError 是否网络级(连接类)失败。

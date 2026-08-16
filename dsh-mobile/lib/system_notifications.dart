@@ -39,6 +39,29 @@ class SystemNotifications {
     }
   }
 
+  /// 启动前台保活服务:Android 会把 DSH 进程优先级提高到前台服务级,
+  /// 减少切后台后进程被杀、WebSocket 断开、通知收不到的概率。
+  static Future<void> startKeepAlive() async {
+    try {
+      await _channel.invokeMethod<void>('startKeepAlive');
+    } on PlatformException {
+      // 保活服务不可用时仍以普通后台进程运行。
+    } on MissingPluginException {
+      // 非 Android 平台或调试环境没有该通道。
+    }
+  }
+
+  /// 停止保活服务;退出主页/清除配置时调用。
+  static Future<void> stopKeepAlive() async {
+    try {
+      await _channel.invokeMethod<void>('stopKeepAlive');
+    } on PlatformException {
+      // 服务可能未在运行。
+    } on MissingPluginException {
+      // 非 Android 平台或调试环境没有该通道。
+    }
+  }
+
   /// 解析 WebView 发来的 JSON 并展示。
   static Future<void> showFromWeb(String payload) async {
     try {

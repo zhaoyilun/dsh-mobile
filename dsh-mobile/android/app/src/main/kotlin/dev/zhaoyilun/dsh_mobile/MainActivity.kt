@@ -39,6 +39,8 @@ class MainActivity : FlutterActivity() {
             when (call.method) {
                 "requestPermission" -> requestNotificationPermission(result)
                 "show" -> showNotification(call.argument("title"), call.argument("body"), call.argument("sessionId"), result)
+                "startKeepAlive" -> startKeepAlive(result)
+                "stopKeepAlive" -> stopKeepAlive(result)
                 else -> result.notImplemented()
             }
         }
@@ -61,6 +63,37 @@ class MainActivity : FlutterActivity() {
             }
         }
         result.success(true)
+    }
+
+    private fun startKeepAlive(result: MethodChannel.Result) {
+        val intent = Intent(this, DshKeepAliveService::class.java)
+            .setAction(DshKeepAliveService.ACTION_START)
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                startForegroundService(intent)
+            } else {
+                @Suppress("DEPRECATION")
+                startService(intent)
+            }
+            result.success(true)
+        } catch (error: RuntimeException) {
+            // 厂商 ROM 或系统限制禁止前台服务时,不阻塞 App 主流程。
+            result.success(false)
+        }
+    }
+
+    private fun stopKeepAlive(result: MethodChannel.Result) {
+        stopService(Intent(this, DshKeepAliveService::class.java))
+        result.success(true)
+    }
+
+    override fun onDestroy() {
+        // Activity 真正结束(退出/划掉任务)时停止保活服务;后台只是 pause,
+        // 不会走到这里。系统回收进程时服务随进程一起消失,不设 STICKY 重启。
+        if (isFinishing && !isChangingConfigurations) {
+            stopService(Intent(this, DshKeepAliveService::class.java))
+        }
+        super.onDestroy()
     }
 
     private fun showNotification(

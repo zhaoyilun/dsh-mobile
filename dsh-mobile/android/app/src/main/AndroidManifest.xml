@@ -3,6 +3,9 @@
     <uses-permission android:name="android.permission.INTERNET"/>
     <!-- Android 13+ notification permission for DSH events. -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+    <!-- Foreground keep-alive: keep the DSH relay WebSocket alive in background. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE"/>
     <application
         android:label="DSH"
         android:name="${applicationName}"
@@ -11,6 +14,14 @@
         android:fullBackupContent="false"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:networkSecurityConfig="@xml/network_security_config">
+        <service
+            android:name=".DshKeepAliveService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Keeps the self-hosted DSH relay WebSocket alive so approval and completion notifications arrive while the app is backgrounded"/>
+        </service>
         <activity
             android:name=".MainActivity"
             android:exported="true"

@@ -21,7 +21,13 @@ cloud-relay，再经 local-relay 隧道回到 Mac/工作站上的 DSH；局域�
 - 导航白名单：只放行与配置服务器同源的顶层导航，外链/未知域一律阻止；
 - 设置入口在移动 Web 的设置页，通过 `DshShell` JS bridge 唤起原生设置；
 - 凭据由 flutter_secure_storage（Android Keystore）加密存储，绝不写入日志；
-- Android 允许系统截图/录屏（不设置 FLAG_SECURE）。
+- Android 允许系统截图/录屏（不设置 FLAG_SECURE）；
+- **前台保活服务**：进入主页后启动低优先级前台服务，切到后台时进程不会被
+  系统当作普通缓存进程回收，WebSocket 与通知桥继续工作；
+- **Cookie 优先冷启动**：已配对手机直接加载无凭据的 `/m/`，只有收到
+  401/403 才回退配对，不再每次打开都重新校验口令；
+- **回前台自动刷新**：后台停留超过 1 分钟再回来时自动 reload `/m/`，
+  让会话/任务状态重新拉取。
 
 移动 Web 侧体验（位于 `../deepseek-harness`）：
 
@@ -61,6 +67,12 @@ Release 构建不会回退到 debug key；缺少 key.properties 时会直接报�
 flutter analyze
 flutter test
 ```
+
+## 限制
+
+- 保活服务只覆盖「App 在后台」的场景；如果用户从最近任务**划掉 App** 或在
+  系统设置里**强制停止**，WebView 与前台服务会一起结束，新通知无法产生
+  （这是 WebView 架构的硬边界，后续可改为原生事件通道）。
 
 ## 相关文档
 

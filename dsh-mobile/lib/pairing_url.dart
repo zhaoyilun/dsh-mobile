@@ -9,6 +9,13 @@ import 'config_store.dart';
 ///
 /// 凭据(query 参数)由 [Uri.replace] 负责百分号编码,含 `&`、`=`、`?`、
 /// `#`、空格等特殊字符均安全;`next` 为同源相对路径,编码后由服务端解码。
+/// 构造不带任何凭据的移动壳地址 `/m/`:配对成功后 cookie 才是会话凭据,
+/// 冷启动优先加载它,可以避免每次打开都重新校验手机口令/配对令牌。
+Uri buildMobileUrl(AppConfig config) {
+  final base = Uri.parse(config.baseUrl);
+  return base.replace(path: '/m/');
+}
+
 Uri buildPairingUrl(AppConfig config) {
   final base = Uri.parse(config.baseUrl);
   switch (config.mode) {
