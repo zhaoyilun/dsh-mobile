@@ -14,6 +14,8 @@ import { act, cleanup, fireEvent, render, within } from '@testing-library/react'
 
 /** Posts received by the mocked Flutter `DshNotify` JavaScript channel. */
 let dshNoticePosts: Array<{ title?: unknown; body?: unknown; sessionId?: unknown }> = []
+/** Messages received by the mocked Flutter `DshShell` bridge. */
+let dshShellPosts: string[] = []
 
 beforeEach(() => {
   // The frame persists its page/drawer into browser history; reset the
@@ -23,11 +25,14 @@ beforeEach(() => {
   // The shell forwards notifications through the native `DshNotify` channel.
   dshNoticePosts = []
   window.DshNotify = { postMessage: (message) => { dshNoticePosts.push(JSON.parse(message) as typeof dshNoticePosts[number]) } }
+  dshShellPosts = []
+  window.DshShell = { postMessage: (message) => { dshShellPosts.push(message) } }
 })
 
 afterEach(() => {
   cleanup()
   delete window.DshNotify
+  delete window.DshShell
 })
 import { SlotCore, type PropsRenderSlots, type SlotRendererHost } from '@deepseek-ai/dsh-client-ui-slots'
 import { createSlotRenderer } from '@deepseek-ai/dsh-client-web-react'
@@ -354,6 +359,15 @@ describe('frame slot fixture (one composition, two shells)', () => {
     view.unmount()
   })
 
+  it('the force-refresh button asks the Flutter shell to reload /m/', () => {
+    const list = makeListSource(listState([sid('s1')], sid('s1')))
+    const { view } = renderMobile(list)
+
+    fireEvent.click(view.getByLabelText('强制刷新'))
+    expect(dshShellPosts).toEqual(['refresh'])
+    view.unmount()
+  })
+
   it('the menu button toggles the drawer and the mask closes it', () => {
     const list = makeListSource(listState([sid('s1')], sid('s1')))
     const { view } = renderMobile(list)
@@ -411,6 +425,42 @@ describe('frame slot fixture (one composition, two shells)', () => {
       expect(view.getByLabelText('折叠 工作区 A').getAttribute('aria-expanded')).toBe('true')
       expect(within(panel).getByText('会话 s1')).toBeDefined()
       expect(within(panel).getByText('会话 s2')).toBeDefined()
+      view.unmount()
+    })
+
+    it('sorts sessions by latest conversation time instead of creation/input order', () => {
+      const ids = [sid('s1'), sid('s2'), sid('s3'), sid('s4'), sid('s5'), sid('s6')]
+      const state = listState(ids, sid('s1'))
+      const times: Record<string, number> = {
+        [sid('s1')]: 1_000,
+        [sid('s2')]: 6_000,
+        [sid('s3')]: 5_000,
+        [sid('s4')]: 4_000,
+        [sid('s5')]: 3_000,
+        [sid('s6')]: 2_000,
+      }
+      for (const id of ids) {
+        state.byId[id] = { ...state.byId[id]!, updatedAt: times[id] }
+      }
+      const list = makeListSource(state)
+      const workspaces = makeWorkspacesSource({
+        ...emptyWorkspacesState(),
+        items: [
+          { workspaceId: 'w1' as WorkspaceId, path: '/work/a', title: '工作区 A', sessionIds: ids, createdAt: '0', updatedAt: '0' },
+        ],
+      })
+      const { view } = renderMobile(list, workspaces)
+
+      fireEvent.click(view.getByLabelText('打开会话列表'))
+      const panel = drawer(view)
+      const rowIds = (): Array<string | null> => Array.from(panel.querySelectorAll('[data-session-id]'))
+        .map(el => el.getAttribute('data-session-id'))
+
+      // 预览态也按最新对话时间取前 5 个;最旧的 s1 不在预览里。
+      expect(rowIds()).toEqual([sid('s2'), sid('s3'), sid('s4'), sid('s5'), sid('s6')])
+
+      fireEvent.click(view.getByLabelText('显示全部 工作区 A'))
+      expect(rowIds()).toEqual([sid('s2'), sid('s3'), sid('s4'), sid('s5'), sid('s6'), sid('s1')])
       view.unmount()
     })
 

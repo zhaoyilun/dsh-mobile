@@ -85,6 +85,8 @@ const PENDING_NOTICE: Readonly<Record<string, { label: string }>> = {
 declare global {
   interface Window {
     DshNotify?: { postMessage(message: string): void }
+    /** Flutter shell bridge: openSettings / refresh. */
+    DshShell?: { postMessage(message: string): void }
   }
 }
 
@@ -335,6 +337,23 @@ export function MobileFrame({ useSessions, openSession, projection, goal, worksp
           aria-label="打开会话列表"
         >
           ≡
+        </button>
+        <button
+          type="button"
+          className={css.floatingRefresh}
+          onClick={() => {
+            try {
+              // Flutter 壳负责清缓存后重新加载 /m/;浏览器里退化为 location.reload。
+              window.DshShell?.postMessage('refresh')
+              return
+            } catch {
+              // fall through to the browser reload below.
+            }
+            window.location.reload()
+          }}
+          aria-label="强制刷新"
+        >
+          ⟳
         </button>
       </div>
     )
