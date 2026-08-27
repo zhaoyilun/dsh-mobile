@@ -24,11 +24,14 @@ class MainActivity : FlutterActivity() {
         private const val NOTIFICATION_CHANNEL_ID = "dsh_events"
         private const val NOTIFICATION_CHANNEL_NAME = "DSH 通知"
         private const val PERMISSION_REQUEST_CODE = 4101
+        private const val FILE_PICKER_REQUEST_CODE = 4102
         private const val EXTRA_SESSION_ID = "dsh_session_id"
         private const val PREFS_NAME = "dsh_notifications"
         private const val PREF_PERMISSION_ASKED = "permission_asked_v2"
         private val notificationSeq = AtomicInteger(0)
     }
+
+    private var pendingFilePickerResult: MethodChannel.Result? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -42,6 +45,7 @@ class MainActivity : FlutterActivity() {
                 "openNotificationSettings" -> openNotificationSettings(result)
                 "test" -> showNotification("DSH 通知测试", "如果你看到这条消息,通知链路正常", null, result)
                 "show" -> showNotification(call.argument("title"), call.argument("body"), call.argument("sessionId"), result)
+                "pickFiles" -> pickFiles(result)
                 "startKeepAlive" -> startKeepAlive(result)
                 "stopKeepAlive" -> stopKeepAlive(result)
                 else -> result.notImplemented()
@@ -120,6 +124,44 @@ class MainActivity : FlutterActivity() {
             stopService(Intent(this, DshKeepAliveService::class.java))
         }
         super.onDestroy()
+    }
+
+    private fun pickFiles(result: MethodChannel.Result) {
+        if (pendingFilePickerResult != null) {
+            result.error("busy", "file picker already open", null)
+            return
+        }
+        pendingFilePickerResult = result
+        val intent = android.content.Intent(android.content.Intent.ACTION_GET_CONTENT).apply {
+            type = "image/*"
+            addCategory(android.content.Intent.CATEGORY_OPENABLE)
+            putExtra(android.content.Intent.EXTRA_ALLOW_MULTIPLE, true)
+        }
+        try {
+            startActivityForResult(intent, FILE_PICKER_REQUEST_CODE)
+        } catch (error: RuntimeException) {
+            pendingFilePickerResult = null
+            result.error("no-activity", "no image picker available", null)
+        }
+    }
+
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: android.content.Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode != FILE_PICKER_REQUEST_CODE) return
+        val result = pendingFilePickerResult ?: return
+        pendingFilePickerResult = null
+        if (resultCode != RESULT_OK || data == null) {
+            result.success(emptyList<String>())
+            return
+        }
+        val uris = mutableListOf<String>()
+        data.clipData?.let { clip ->
+            for (index in 0 until clip.itemCount) {
+                clip.getItemAt(index)?.uri?.let { uris.add(it.toString()) }
+            }
+        }
+        data.data?.let { uris.add(it.toString()) }
+        result.success(uris)
     }
 
     private fun showNotification(

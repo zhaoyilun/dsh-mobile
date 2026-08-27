@@ -1,8 +1,11 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io' show Platform;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:webview_flutter/webview_flutter.dart';
+import 'package:webview_flutter_android/webview_flutter_android.dart';
 
 import '../config_store.dart';
 import '../pairing_url.dart';
@@ -80,6 +83,9 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
 
   /// 后台停留超过该时长后,回前台主动 reload,让会话/任务状态刷新。
   static const _backgroundRefreshThreshold = Duration(minutes: 1);
+
+  /// 原生文件选择通道:WebView 的 `<input type=file>` 会回调这里。
+  static const _fileChannel = MethodChannel('dev.zhaoyilun.dsh_mobile/files');
 
   bool get _inErrorOverlay => _errorMessage != null;
 
@@ -207,6 +213,11 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         ),
       )
       ..loadRequest(initialUrl);
+    // Android WebView 需要显式允许文件选择器,否则 `<input type=file>`
+    // 点击后不会弹出系统相册/文件选择器,图片无法上传。
+    if (Platform.isAndroid) {
+      unawaited(_configureAndroidFileSelector());
+    }
   }
 
   /// 加载失败统一入口:还有剩余自动重试 → 排程重连;耗尽 → 错误页。
@@ -287,6 +298,26 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       }
     } catch (_) {
       // 页面尚未就绪或 JS 被禁用时不处理;onHttpError 路径仍是主通道。
+    }
+  }
+
+  /// 配置 Android WebView 文件选择器:把网页的 `input[type=file]` 转化为
+  /// 原生系统图片选择器,并把选中的 content URI 返回给 WebView。
+  Future<void> _configureAndroidFileSelector() async {
+    try {
+      final android = _controller.platform as AndroidWebViewController;
+      await android.setOnShowFileSelector((params) async {
+        try {
+          final paths = await _fileChannel.invokeListMethod<String>('pickFiles');
+          return paths ?? <String>[];
+        } on PlatformException {
+          return <String>[];
+        } on MissingPluginException {
+          return <String>[];
+        }
+      });
+    } catch (_) {
+      // 非 Android 或旧版 WebView 不支持文件选择器时静默降级。
     }
   }
 

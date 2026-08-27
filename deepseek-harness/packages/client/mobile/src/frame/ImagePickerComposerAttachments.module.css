@@ -1,0 +1,33 @@
+/* Mobile-only add-image pill: visible touch target inside the composer. */
+.root {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 4px 12px 0;
+}
+
+.pick {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 999px;
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-primary);
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.pick:hover {
+  background: var(--dsw-alias-interactive-bg-hover-solid);
+}
+
+/* Hidden but still reachable by the button click. */
+.input {
+  display: none;
+}

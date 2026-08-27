@@ -16,9 +16,11 @@ import type { WorkspaceId } from '@deepseek-ai/dsh-api-remotes/client'
 import type {} from '@deepseek-ai/dsh-api-remotes/client'
 import type {} from '@deepseek-ai/dsh-client-locale/client'
 import type { ILayout } from '@deepseek-ai/dsh-client-ui-layout/client'
+import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type { GoalActionResult } from '@deepseek-ai/dsh-client-ui-goal/client'
 import type { GoalRef } from '@deepseek-ai/dsh-goal/client'
 import { MobileFrame } from './frame/MobileFrame.tsx'
+import { MobileImagePickerComposerAttachments } from './frame/ImagePickerComposerAttachments.tsx'
 
 /** Shell-owned pseudo entry id under which the mobile boot mounts this plugin. */
 export const MOBILE_SHELL_ID = '@deepseek-ai/dsh-client-mobile-app-shell'
@@ -78,6 +80,16 @@ export function apply(ctx: Context): void {
     openDetails() {},
     closeDetails() {},
   }
+
+  // Mobile image picker: register the touch picker into the composer
+  // attachment slot at a lower priority so it shadows the desktop-only
+  // paste/drop surface while keeping the original rail/preview delegation.
+  ctx.slots.inject('conversation.input.attachments', () => ctx.slots.register({
+    name: 'conversation.input.attachments',
+    priority: -1,
+    registrant: 'dsh-client-mobile',
+    locale: 'conversation',
+  }, MobileImagePickerComposerAttachments))
 
   ctx.effect(() => {
     const disposeLayout = ctx.reflect.provide('layout', layout)

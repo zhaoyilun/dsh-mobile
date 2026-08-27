@@ -36,7 +36,9 @@
     "@deepseek-ai/dsh-client-ui-layout": "workspace:^",
     "@deepseek-ai/dsh-client-web": "workspace:^",
     "react": "^18.2.0",
-    "react-dom": "^18.2.0"
+    "react-dom": "^18.2.0",
+    "@deepseek-ai/dsh-client-ui-attachment": "workspace:^",
+    "@deepseek-ai/dsh-client-ui-conversation": "workspace:^"
   },
   "devDependencies": {
     "@deepseek-ai/dsh-api-remotes": "workspace:^",
