@@ -26,7 +26,7 @@ class MainActivity : FlutterActivity() {
         private const val PERMISSION_REQUEST_CODE = 4101
         private const val EXTRA_SESSION_ID = "dsh_session_id"
         private const val PREFS_NAME = "dsh_notifications"
-        private const val PREF_PERMISSION_ASKED = "permission_asked"
+        private const val PREF_PERMISSION_ASKED = "permission_asked_v2"
         private val notificationSeq = AtomicInteger(0)
     }
 
@@ -38,6 +38,9 @@ class MainActivity : FlutterActivity() {
         ).setMethodCallHandler { call, result ->
             when (call.method) {
                 "requestPermission" -> requestNotificationPermission(result)
+                "isNotificationPermissionGranted" -> result.success(notificationPermissionGranted())
+                "openNotificationSettings" -> openNotificationSettings(result)
+                "test" -> showNotification("DSH 通知测试", "如果你看到这条消息,通知链路正常", null, result)
                 "show" -> showNotification(call.argument("title"), call.argument("body"), call.argument("sessionId"), result)
                 "startKeepAlive" -> startKeepAlive(result)
                 "stopKeepAlive" -> stopKeepAlive(result)
@@ -63,6 +66,29 @@ class MainActivity : FlutterActivity() {
             }
         }
         result.success(true)
+    }
+
+    private fun notificationPermissionGranted(): Boolean {
+        return Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
+            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) ==
+            android.content.pm.PackageManager.PERMISSION_GRANTED
+    }
+
+    private fun openNotificationSettings(result: MethodChannel.Result) {
+        try {
+            val intent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                android.content.Intent(android.provider.Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                    .putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, packageName)
+            } else {
+                @Suppress("DEPRECATION")
+                android.content.Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
+                    .setData(android.net.Uri.parse("package:$packageName"))
+            }
+            startActivity(intent)
+            result.success(true)
+        } catch (error: RuntimeException) {
+            result.success(false)
+        }
     }
 
     private fun startKeepAlive(result: MethodChannel.Result) {

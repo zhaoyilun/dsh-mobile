@@ -10,19 +10,21 @@
  * screen adaptation stays in this package's CSS, scoped under
  * [data-mobile-shell].
  */
+import type { ReactNode } from 'react'
 import type { SessionId, SessionListState } from '@deepseek-ai/dsh-client-runtime/client'
 import type { SnapshotSelectorHook } from '@deepseek-ai/dsh-client-ui-slots'
-import { DeclaredSlotOutlet } from '@deepseek-ai/dsh-client-web-react'
 import css from './ConversationPage.module.css'
 
 /** Props: the open session and the sessions hook. */
 export interface ConversationPageProps {
   sessionId: SessionId
   useSessions: SnapshotSelectorHook<SessionListState>
+  /** The desktop conversation column, rendered by the mobile root owner. */
+  children: ReactNode
 }
 
 /** The mobile conversation home (see module doc). */
-export function ConversationPage({ sessionId, useSessions }: ConversationPageProps) {
+export function ConversationPage({ sessionId, useSessions, children }: ConversationPageProps) {
   // The hook reference is kept for the component contract; the embedded column
   // itself owns session rendering. Passing it keeps future narrow-screen
   // adapters in this page able to read the session without prop drilling.
@@ -31,7 +33,7 @@ export function ConversationPage({ sessionId, useSessions }: ConversationPagePro
   return (
     <div className={css.page} data-mobile-conversation>
       <div className={css.column}>
-        <DeclaredSlotOutlet slotKey="conversation" ownerProps={{}} />
+        {children}
       </div>
     </div>
   )

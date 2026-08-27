@@ -10,7 +10,8 @@
 环境变量 `DSH_MOBILE_DIST_INDEX`。两者都没有时插件保持休眠，`dsh web` 照常启动，
 不会拖垮整个 harness。
 
-`dist/` 由以下命令生成：
+`dist/` 由以下命令生成（当前源码已对齐 DSH 0.1.1-rc.2，构建产物不再需要
+rc.8 时代的后构建补丁）：
 
 ```bash
 cd deepseek-harness

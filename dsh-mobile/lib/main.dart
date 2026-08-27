@@ -5,7 +5,6 @@ import 'package:flutter/material.dart';
 import 'config_store.dart';
 import 'pages/home_page.dart';
 import 'pages/setup_page.dart';
-import 'system_notifications.dart';
 import 'theme.dart';
 import 'widgets/dsh_brand_mark.dart';
 
@@ -16,7 +15,6 @@ import 'widgets/dsh_brand_mark.dart';
 /// 配对用 cookie 会话(见 DESIGN.md §6)。
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
-  unawaited(SystemNotifications.requestPermission());
   runApp(const DshMobileApp());
 }
 

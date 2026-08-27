@@ -1,42 +1,36 @@
+import 'dart:convert';
+
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 /// 连接模式:公网服务器(默认,推荐)与局域网直连(次要)。
-///
-/// - [ConnectionMode.public]:服务器地址 `https://<域名>` + 手机口令
-///   (phone-pass),经云端中继接入;
-/// - [ConnectionMode.lan]:服务器地址 `http(s)://<ip>:<port>` + 配对令牌,
-///   直连局域网内 DSH 服务器。
 enum ConnectionMode { public, lan }
 
 /// 应用配置:连接模式 + 服务器地址 + 访问凭据(公网=手机口令,局域网=配对令牌)。
 ///
-/// 安全要求(见 DESIGN.md §6 R):
-/// - 凭据用 flutter_secure_storage(Android Keystore)加密存储,绝不明文落盘;
-/// - 凭据绝不出现在日志/崩溃报告中;
-/// - 公网模式仅允许 https://;局域网模式允许 http:// 与 https://。
+/// 多设备支持:
+/// - [id] 是设备档案的唯一 ID,由 ConfigStore 分配;为空表示尚未落库(首次保存时分配);
+/// - [name] 是展示名,便于在手机上一眼认出 Mac mini / Windows / Linux 等设备;
+/// - 凭据仍走 flutter_secure_storage,绝不进入 shared_preferences 明文。
 class AppConfig {
   const AppConfig({
     this.mode = ConnectionMode.public,
     required this.serverUrl,
     required this.token,
+    this.id,
+    this.name,
   });
 
   final ConnectionMode mode;
-
-  /// 服务器地址(含 scheme,可带端口)。
   final String serverUrl;
-
-  /// 访问凭据:公网模式为手机口令(phone-pass),局域网模式为配对令牌。
   final String token;
+  final String? id;
+  final String? name;
 
   bool get isComplete => serverUrl.isNotEmpty && token.isNotEmpty;
 
-  /// 去掉尾部斜杠后的服务器地址,用于拼接配对 URL。
   String get baseUrl => serverUrl.replaceAll(RegExp(r'/+$'), '');
 
-  /// 用于展示的 origin(不含路径、查询与凭据),可在加载页/错误页/设置页
-  /// 安全展示;解析失败时回退为原地址。
   String get displayOrigin {
     final uri = Uri.tryParse(baseUrl);
     if (uri == null || !uri.hasScheme || uri.host.isEmpty) {
@@ -45,16 +39,38 @@ class AppConfig {
     return uri.origin;
   }
 
-  /// 模式的中文展示名。
   String get modeLabel => switch (mode) {
     ConnectionMode.public => '公网服务器',
     ConnectionMode.lan => '局域网直连',
   };
+
+  /// 默认设备名:优先使用用户命名,否则用服务器主机名。
+  String get displayName {
+    final explicit = name?.trim();
+    if (explicit != null && explicit.isNotEmpty) return explicit;
+    final uri = Uri.tryParse(baseUrl);
+    if (uri != null && uri.host.isNotEmpty) return uri.host;
+    return '未命名设备';
+  }
+
+  AppConfig copyWith({
+    ConnectionMode? mode,
+    String? serverUrl,
+    String? token,
+    String? id,
+    String? name,
+  }) {
+    return AppConfig(
+      mode: mode ?? this.mode,
+      serverUrl: serverUrl ?? this.serverUrl,
+      token: token ?? this.token,
+      id: id ?? this.id,
+      name: name ?? this.name,
+    );
+  }
 }
 
 /// 两个 URL 是否同源(scheme/host/port 一致)。
-///
-/// 解析失败或任一为空时返回 false;path/query 不参与比较。
 bool isSameOriginUrl(String? a, String? b) {
   final ua = Uri.tryParse((a ?? '').trim());
   final ub = Uri.tryParse((b ?? '').trim());
@@ -65,10 +81,6 @@ bool isSameOriginUrl(String? a, String? b) {
 }
 
 /// 按连接模式校验服务器地址,返回错误文案;合法时返回 null。
-///
-/// - public:仅接受 https://(公网域名,手机口令须经 TLS 传输);
-/// - lan:接受 http://(局域网直连)与 https:// 两种 scheme;
-/// - 拒绝 userinfo、query、fragment、非根 path 与异常端口,避免配置歧义。
 String? validateModeServerUrl(ConnectionMode mode, String? raw) {
   final value = raw?.trim() ?? '';
   if (value.isEmpty) {
@@ -102,13 +114,15 @@ String? validateModeServerUrl(ConnectionMode mode, String? raw) {
 }
 
 /// 配置持久化:
-/// - 连接模式与服务器地址:shared_preferences(非敏感);
-/// - 访问凭据:flutter_secure_storage(Keystore 加密)。
-///
-/// 注意:flutter_secure_storage v10 起 `encryptedSharedPreferences` 已被
-/// Jetpack Security 上游废弃(v11 移除),数据会自动迁移到 Keystore 自定义
-/// cipher(AES-GCM + RSA 包装);保留该参数以显式声明加密存储意图。
+/// - 设备档案列表(模式/地址/名称)存 shared_preferences(非敏感,JSON);
+/// - 每个设备的访问凭据独立存 flutter_secure_storage(Keystore 加密);
+/// - 兼容旧版单设备字段,首次读取时自动迁移成一条「默认设备」档案。
 class ConfigStore {
+  static const _kProfiles = 'device_profiles';
+  static const _kActiveProfile = 'active_device_id';
+  static const _kTokenPrefix = 'profile_token_';
+
+  // 旧版单设备字段,仅用于兼容迁移。
   static const _kServerUrl = 'server_url';
   static const _kToken = 'pair_token';
   static const _kMode = 'connection_mode';
@@ -117,96 +131,249 @@ class ConfigStore {
     aOptions: AndroidOptions(encryptedSharedPreferences: true),
   );
 
+  String _tokenKey(String id) => '$_kTokenPrefix$id';
+
+  String _newId() => DateTime.now().microsecondsSinceEpoch.toString();
+
   /// 读取已保存的配置;未配置、配置不完整或已失效时返回 null(回设置页)。
-  ///
-  /// 兼容旧版本:未保存过连接模式时按公网模式(默认推荐)处理;但加载时仍会
-  /// 按模式重新校验 URL,旧版 `http://` 配置不会被当作公网配置放行。
   Future<AppConfig?> load() async {
-    final prefs = await SharedPreferences.getInstance();
-    final serverUrl = prefs.getString(_kServerUrl) ?? '';
-    final token = await _secure.read(key: _kToken) ?? '';
-    if (serverUrl.isEmpty || token.isEmpty) {
-      return null;
+    final activeId = await _activeId();
+    if (activeId != null) {
+      final config = await _loadProfile(activeId);
+      if (config != null) return config;
     }
-    final mode = _modeFromName(prefs.getString(_kMode));
-    if (validateModeServerUrl(mode, serverUrl) != null) {
-      return null;
-    }
-    final config = AppConfig(mode: mode, serverUrl: serverUrl, token: token);
-    try {
-      Uri.parse(config.baseUrl);
-    } on FormatException {
-      return null;
-    }
-    return config;
+    return _loadLegacy();
   }
 
+  /// 读取全部设备档案(含各自凭据;损坏/缺 token 的档案会跳过)。
+  Future<List<AppConfig>> loadProfiles() async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(_kProfiles);
+    final list = <AppConfig>[];
+    if (raw != null) {
+      try {
+        final decoded = jsonDecode(raw);
+        if (decoded is List) {
+          for (final item in decoded) {
+            if (item is! Map<String, dynamic>) continue;
+            final id = item['id'];
+            final serverUrl = item['serverUrl'];
+            final modeName = item['mode'];
+            final name = item['name'];
+            if (id is! String || serverUrl is! String || modeName is! String) {
+              continue;
+            }
+            final mode = _modeFromName(modeName);
+            final token = await _secure.read(key: _tokenKey(id));
+            if (token == null || token.isEmpty) continue;
+            if (validateModeServerUrl(mode, serverUrl) != null) continue;
+            list.add(AppConfig(
+              mode: mode,
+              serverUrl: serverUrl,
+              token: token,
+              id: id,
+              name: name is String ? name : null,
+            ));
+          }
+        }
+      } catch (_) {
+        // 解析失败按空列表处理;旧版迁移路径会兜底。
+      }
+    }
+    if (list.isNotEmpty) return list;
+
+    // 旧版单设备迁移:分配新 id,写回 profile 列表,返回已迁移的档案。
+    final legacy = await _loadLegacy();
+    if (legacy == null) return [];
+    final migrated = legacy.copyWith(id: _newId());
+    await _saveProfile(migrated, makeActive: true);
+    return [migrated];
+  }
+
+  /// 当前激活的设备 ID。
+  Future<String?> activeProfileId() => _activeId();
+
+  /// 保存配置。若 [config] 带 id 则更新该档案,否则更新当前激活档案
+  /// (没有激活档案时新建一条)并设为激活。
   Future<void> save(AppConfig config) async {
-    // 存储层同样守住「模式 ↔ URL」约束,避免绕过 UI 把凭据写入错误模式。
-    final urlError = validateModeServerUrl(config.mode, config.serverUrl);
-    if (urlError != null) {
-      throw ArgumentError(urlError);
+    // 显式带 id 表示编辑已有设备;不带 id 表示新增一台设备。
+    final id = config.id ?? _newId();
+    final mode = config.mode;
+    if (validateModeServerUrl(mode, config.serverUrl) != null) {
+      throw ArgumentError('invalid server url');
     }
     if (config.token.trim().isEmpty) {
       throw ArgumentError('token is empty');
     }
+    await _saveProfile(config.copyWith(id: id), makeActive: true);
+  }
+
+  /// 删除一个设备档案;若删除的是当前激活档案,自动切到剩余档案的第一条。
+  Future<void> deleteProfile(String id) async {
     final prefs = await SharedPreferences.getInstance();
-    // 保存旧值,任一步写入失败时尽量回滚,避免「新服务器/新模式 + 旧 token」
-    // 这类半更新状态把凭据发往错误端点。
-    final oldServerUrl = prefs.getString(_kServerUrl);
-    final oldMode = prefs.getString(_kMode);
-    final oldToken = await _secure.read(key: _kToken);
-    try {
-      await prefs.setString(_kServerUrl, config.serverUrl.trim());
-      await prefs.setString(_kMode, config.mode.name);
-      await _secure.write(key: _kToken, value: config.token.trim());
-    } catch (_) {
-      await _restore(prefs, oldServerUrl, oldMode, oldToken);
-      rethrow;
+    final list = await _readProfileMetadata();
+    final next = list.where((item) => item['id'] != id).toList();
+    await prefs.setString(_kProfiles, jsonEncode(next));
+    await _secure.delete(key: _tokenKey(id));
+
+    final activeId = await _activeId();
+    if (activeId == id) {
+      if (next.isNotEmpty) {
+        final nextId = next.first['id'] as String;
+        await switchProfile(nextId);
+      } else {
+        await prefs.remove(_kActiveProfile);
+        await _clearLegacy();
+      }
+    } else {
+      // 非激活档案被删,保持当前激活状态;同步旧版镜像以免 stale。
+      await _mirrorLegacyIfActive(await _activeId());
     }
   }
 
+  /// 切换激活设备,并同步旧版单设备镜像字段。
+  Future<void> switchProfile(String id) async {
+    final profile = await _loadProfile(id);
+    if (profile == null) {
+      throw ArgumentError('profile not found or incomplete: $id');
+    }
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_kActiveProfile, id);
+    await _mirrorLegacy(profile);
+  }
+
+  /// 清空所有设备档案与凭据。
   Future<void> clear() async {
     final prefs = await SharedPreferences.getInstance();
-    // 先删敏感凭据:即使后续 prefs 删除失败,load() 也会因 token 为空返回 null,
-    // 不会残留可用会话。
-    await _secure.delete(key: _kToken);
-    await prefs.remove(_kServerUrl);
-    await prefs.remove(_kMode);
+    final list = await _readProfileMetadata();
+    for (final item in list) {
+      final id = item['id'];
+      if (id is String) {
+        await _secure.delete(key: _tokenKey(id));
+      }
+    }
+    await prefs.remove(_kProfiles);
+    await prefs.remove(_kActiveProfile);
+    await _clearLegacy();
   }
 
-  Future<void> _restore(
-    SharedPreferences prefs,
-    String? serverUrl,
-    String? mode,
-    String? token,
-  ) async {
+  Future<void> _saveProfile(AppConfig config, {required bool makeActive}) async {
+    final prefs = await SharedPreferences.getInstance();
+    final id = config.id ?? _newId();
+    final list = await _readProfileMetadata();
+    final entry = {
+      'id': id,
+      'name': config.name ?? '',
+      'mode': config.mode.name,
+      'serverUrl': config.serverUrl.trim(),
+    };
+    final index = list.indexWhere((item) => item['id'] == id);
+    if (index >= 0) {
+      list[index] = entry;
+    } else {
+      list.add(entry);
+    }
+    await prefs.setString(_kProfiles, jsonEncode(list));
+    await _secure.write(key: _tokenKey(id), value: config.token.trim());
+    if (makeActive) {
+      await prefs.setString(_kActiveProfile, id);
+      await _mirrorLegacy(config.copyWith(id: id));
+    }
+  }
+
+  Future<AppConfig?> _loadProfile(String id) async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(_kProfiles);
+    if (raw == null) return null;
     try {
-      if (serverUrl == null) {
-        await prefs.remove(_kServerUrl);
-      } else {
-        await prefs.setString(_kServerUrl, serverUrl);
-      }
-      if (mode == null) {
-        await prefs.remove(_kMode);
-      } else {
-        await prefs.setString(_kMode, mode);
-      }
-      if (token == null) {
-        await _secure.delete(key: _kToken);
-      } else {
-        await _secure.write(key: _kToken, value: token);
+      final decoded = jsonDecode(raw);
+      if (decoded is! List) return null;
+      for (final item in decoded) {
+        if (item is! Map<String, dynamic>) continue;
+        if (item['id'] != id) continue;
+        final serverUrl = item['serverUrl'];
+        final modeName = item['mode'];
+        final name = item['name'];
+        if (serverUrl is! String || modeName is! String) continue;
+        final mode = _modeFromName(modeName);
+        final token = await _secure.read(key: _tokenKey(id));
+        if (token == null || token.isEmpty) return null;
+        if (validateModeServerUrl(mode, serverUrl) != null) return null;
+        return AppConfig(
+          mode: mode,
+          serverUrl: serverUrl,
+          token: token,
+          id: id,
+          name: name is String ? name : null,
+        );
       }
     } catch (_) {
-      // 回滚失败时保留首次异常;load() 的校验会兜底。
+      return null;
     }
+    return null;
+  }
+
+  Future<String?> _activeId() async {
+    final prefs = await SharedPreferences.getInstance();
+    final id = prefs.getString(_kActiveProfile);
+    if (id == null || id.isEmpty) return null;
+    return id;
+  }
+
+  Future<List<Map<String, dynamic>>> _readProfileMetadata() async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(_kProfiles);
+    if (raw == null || raw.isEmpty) return [];
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is! List) return [];
+      return decoded.whereType<Map<String, dynamic>>().toList();
+    } catch (_) {
+      return [];
+    }
+  }
+
+  Future<AppConfig?> _loadLegacy() async {
+    final prefs = await SharedPreferences.getInstance();
+    final serverUrl = prefs.getString(_kServerUrl) ?? '';
+    final token = await _secure.read(key: _kToken) ?? '';
+    if (serverUrl.isEmpty || token.isEmpty) return null;
+    final mode = _modeFromName(prefs.getString(_kMode));
+    if (validateModeServerUrl(mode, serverUrl) != null) return null;
+    return AppConfig(
+      mode: mode,
+      serverUrl: serverUrl,
+      token: token,
+      id: null,
+      name: null,
+    );
+  }
+
+  Future<void> _mirrorLegacy(AppConfig config) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_kServerUrl, config.serverUrl.trim());
+    await prefs.setString(_kMode, config.mode.name);
+    await _secure.write(key: _kToken, value: config.token.trim());
+  }
+
+  Future<void> _mirrorLegacyIfActive(String? activeId) async {
+    if (activeId == null) return;
+    final active = await _loadProfile(activeId);
+    if (active != null) {
+      await _mirrorLegacy(active);
+    }
+  }
+
+  Future<void> _clearLegacy() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_kServerUrl);
+    await prefs.remove(_kMode);
+    await _secure.delete(key: _kToken);
   }
 
   ConnectionMode _modeFromName(String? name) {
     for (final mode in ConnectionMode.values) {
-      if (mode.name == name) {
-        return mode;
-      }
+      if (mode.name == name) return mode;
     }
     return ConnectionMode.public;
   }

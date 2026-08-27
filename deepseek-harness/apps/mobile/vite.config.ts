@@ -101,12 +101,14 @@ export default defineConfig({
     // sanctioned "import then wrap" path), so it is aliased to src too.
     alias: [
       { find: /^node:module$/, replacement: src('./src/node-module-stub.ts') },
+      { find: /^@deepseek-ai\/cordis$/, replacement: src('../../vendor/cordis/src/index.ts') },
+      { find: /^@deepseek-ai\/cordis-plugin-loader$/, replacement: src('../../vendor/loader/src/index.ts') },
+      { find: /^@deepseek-ai\/cosmokit$/, replacement: src('../../vendor/cosmokit/src/index.ts') },
       { find: /^@deepseek-ai\/dsh-client-mobile$/, replacement: src('../../packages/client/mobile/src/boot.tsx') },
       // The mobile shell consumes the web shell as a LIBRARY (boot kernel
       // pieces: AppRoot, loader-status, seed table), so the package root maps
       // to the web library entry — not its boot entry like apps/web does.
       { find: /^@deepseek-ai\/dsh-client-web$/, replacement: src('../../packages/client/web/src/index.ts') },
-      { find: /^@deepseek-ai\/dsh-client-web-react$/, replacement: src('../../packages/client/web-react/src/index.ts') },
       { find: /^@deepseek-ai\/dsh-client-ui-slots$/, replacement: src('../../packages/client/ui-slots/src/index.ts') },
       { find: /^@deepseek-ai\/dsh-client-ui-primitives$/, replacement: src('../../packages/client/ui-primitives/src/index.ts') },
       { find: /^@deepseek-ai\/dsh-client-ui-attachment$/, replacement: src('../../packages/client/ui-attachment/src/index.ts') },

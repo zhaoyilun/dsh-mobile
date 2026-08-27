@@ -71,7 +71,15 @@ export function apply(ctx, config = {}) {
   }
   const distRoot = dirname(distIndex)
 
-  const renderIndex = async () => ctx.webServer.applyIndexTaps(await readFile(distIndex, 'utf8'))
+  const renderIndex = async () => {
+    const html = await readFile(distIndex, 'utf8')
+    // 0.1.1+: webserver renders the structured injection table (boot wire rows:
+    // queue shim / preloads / __DSH_BOOT__) then legacy taps; ≤rc.8 only has
+    // applyIndexTaps. Feature-detect so one plugin serves both hosts.
+    return typeof ctx.webServer.renderIndex === 'function'
+      ? ctx.webServer.renderIndex(html)
+      : ctx.webServer.applyIndexTaps(html)
+  }
   const route = {
     kind: 'prefix',
     path: MOUNT,

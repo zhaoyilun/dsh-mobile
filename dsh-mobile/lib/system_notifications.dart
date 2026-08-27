@@ -62,6 +62,42 @@ class SystemNotifications {
     }
   }
 
+  /// Android 13+ 通知权限当前是否已授权(低版本恒为 true)。
+  static Future<bool> isPermissionGranted() async {
+    try {
+      return await _channel.invokeMethod<bool>(
+            'isNotificationPermissionGranted',
+          ) ??
+          false;
+    } on PlatformException {
+      return false;
+    } on MissingPluginException {
+      return true;
+    }
+  }
+
+  /// 打开系统的 DSH 通知设置页,让用户手动恢复被关闭的通知权限。
+  static Future<void> openNotificationSettings() async {
+    try {
+      await _channel.invokeMethod<void>('openNotificationSettings');
+    } on PlatformException {
+      // 打不开系统设置时静默失败。
+    } on MissingPluginException {
+      // 非 Android 平台或调试环境没有该通道。
+    }
+  }
+
+  /// 直接从原生侧发一条测试通知,用于确认权限与通知渠道是否正常。
+  static Future<bool> sendTestNotification() async {
+    try {
+      return await _channel.invokeMethod<bool>('test') ?? false;
+    } on PlatformException {
+      return false;
+    } on MissingPluginException {
+      return false;
+    }
+  }
+
   /// 解析 WebView 发来的 JSON 并展示。
   static Future<void> showFromWeb(String payload) async {
     try {

@@ -98,6 +98,14 @@ export function SessionListPage({
     return session !== undefined && rowVisible(session, state.current)
   }
 
+  /** 按最近一次对话时间倒序;同时间用 session id 保证顺序稳定。 */
+  const byLatestConversation = (ids: SessionId[]): SessionId[] => [...ids].sort((a, b) => {
+    const aTime = state.byId[a]?.updatedAt ?? Number.NEGATIVE_INFINITY
+    const bTime = state.byId[b]?.updatedAt ?? Number.NEGATIVE_INFINITY
+    if (aTime !== bTime) return bTime - aTime
+    return a < b ? -1 : 1
+  })
+
   /** Default preview length; long groups expand on demand instead of scrolling inside the group. */
   const PREVIEW_COUNT = 5
 
@@ -127,11 +135,11 @@ export function SessionListPage({
     return {
       key: workspace.workspaceId,
       title: workspace.title.trim() || workspace.path.split('/').filter(Boolean).pop() || '未命名工作区',
-      ids: workspace.sessionIds.filter(visible),
+      ids: byLatestConversation(workspace.sessionIds.filter(visible)),
     }
   }).filter(group => group.ids.length > 0)
 
-  const ungrouped = state.ids.filter(id => visible(id) && !accounted.has(id))
+  const ungrouped = byLatestConversation(state.ids.filter(id => visible(id) && !accounted.has(id)))
   const totalRows = groups.reduce((sum, group) => sum + group.ids.length, 0) + ungrouped.length
   const empty = state.phase === 'ready' && totalRows === 0
 
@@ -145,6 +153,7 @@ export function SessionListPage({
         <button
           type="button"
           className={css.row}
+          data-session-id={session.id}
           data-current={current || undefined}
           onClick={() => { onSelect(id) }}
         >

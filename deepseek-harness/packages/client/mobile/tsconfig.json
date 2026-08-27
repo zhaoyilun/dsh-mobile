@@ -44,8 +44,5 @@
     {
       "path": "../web"
     },
-    {
-      "path": "../web-react"
-    }
   ]
 }

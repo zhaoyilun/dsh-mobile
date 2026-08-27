@@ -20,7 +20,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { ReactNode, TouchEvent as ReactTouchEvent } from 'react'
 import type { SessionId, SessionListState } from '@deepseek-ai/dsh-client-runtime/client'
 import type { WorkspaceId } from '@deepseek-ai/dsh-api-remotes/client'
-import type { PropsRuntime, SnapshotSelectorHook } from '@deepseek-ai/dsh-client-ui-slots'
+import type { PropsRenderSlots, PropsRuntime, SnapshotSelectorHook } from '@deepseek-ai/dsh-client-ui-slots'
 import type { MobileFrameInjected } from '../app-shell.ts'
 import { SessionListPage } from './pages/SessionListPage.tsx'
 import { ConversationPage } from './pages/ConversationPage.tsx'
@@ -33,7 +33,7 @@ import css from './MobileFrame.module.css'
 export type UseSessions = SnapshotSelectorHook<SessionListState>
 
 /** Full composed props: root-scope standard kit + the injected business face. */
-export type MobileFrameProps = PropsRuntime<'mobile-frame'> & MobileFrameInjected
+export type MobileFrameProps = PropsRuntime<'root'> & PropsRenderSlots<'conversation' | 'sidebar' | 'details' | 'shell.overlay'> & MobileFrameInjected
 
 /** Pushed pages reachable from the drawer footer; 'conversation' is the home. */
 type Page = 'conversation' | 'plan' | 'goal' | 'settings'
@@ -85,6 +85,8 @@ const PENDING_NOTICE: Readonly<Record<string, { label: string }>> = {
 declare global {
   interface Window {
     DshNotify?: { postMessage(message: string): void }
+    /** Flutter shell bridge: openSettings / refresh. */
+    DshShell?: { postMessage(message: string): void }
   }
 }
 
@@ -132,7 +134,7 @@ function isMiddleRightSwipe(
 }
 
 /** The mobile frame (see module doc). */
-export function MobileFrame({ useSessions, openSession, projection, goal, workspaces }: MobileFrameProps) {
+export function MobileFrame({ useSessions, useWorkspaces, renderSlot, openSession, projection, goal, workspaces }: MobileFrameProps) {
   const [frame, setFrame] = useState<FrameSnapshot>(() => readFrameSnapshot(history.state) ?? homeSnapshot())
   const { page, drawerOpen } = frame
   const current = useSessions(state => state.current)
@@ -309,7 +311,7 @@ export function MobileFrame({ useSessions, openSession, projection, goal, worksp
     home = (
       <SettingsPage
         useSessions={useSessions}
-        workspaces={workspaces}
+        useWorkspaces={useWorkspaces}
         onOpenPlan={() => { pushPage('plan') }}
         onOpenGoal={() => { pushPage('goal') }}
         onBack={backToConversation}
@@ -327,7 +329,9 @@ export function MobileFrame({ useSessions, openSession, projection, goal, worksp
   } else {
     home = (
       <div className={css.conversationWrap}>
-        <ConversationPage sessionId={current} useSessions={useSessions} />
+        <ConversationPage sessionId={current} useSessions={useSessions}>
+          {renderSlot('conversation', {})}
+        </ConversationPage>
         <button
           type="button"
           className={css.floatingMenu}
@@ -335,6 +339,23 @@ export function MobileFrame({ useSessions, openSession, projection, goal, worksp
           aria-label="打开会话列表"
         >
           ≡
+        </button>
+        <button
+          type="button"
+          className={css.floatingRefresh}
+          onClick={() => {
+            try {
+              // Flutter 壳负责清缓存后重新加载 /m/;浏览器里退化为 location.reload。
+              window.DshShell?.postMessage('refresh')
+              return
+            } catch {
+              // fall through to the browser reload below.
+            }
+            window.location.reload()
+          }}
+          aria-label="强制刷新"
+        >
+          ⟳
         </button>
       </div>
     )
@@ -354,7 +375,7 @@ export function MobileFrame({ useSessions, openSession, projection, goal, worksp
         <aside className={css.drawer} data-drawer role="dialog" aria-label="会话列表">
           <SessionListPage
             useSessions={useSessions}
-            useWorkspaces={workspaces.useWorkspaces}
+            useWorkspaces={useWorkspaces}
             onSelect={selectSession}
             onStartSession={startSessionInWorkspace}
           />

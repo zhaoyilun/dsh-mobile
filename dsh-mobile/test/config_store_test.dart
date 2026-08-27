@@ -298,4 +298,176 @@ void main() {
       expect(await store.load(), isNull);
     });
   });
+
+  group('ConfigStore · 多设备档案', () {
+    test('保存两台设备:第二台设为激活,列表包含两台且凭据独立', () async {
+      SharedPreferences.setMockInitialValues({});
+      FlutterSecureStorage.setMockInitialValues({});
+
+      final store = ConfigStore();
+      await store.save(
+        const AppConfig(
+          mode: ConnectionMode.public,
+          serverUrl: 'https://relay.example.com',
+          token: 'pass-a',
+          name: 'Mac mini',
+        ),
+      );
+      await store.save(
+        const AppConfig(
+          mode: ConnectionMode.lan,
+          serverUrl: 'http://192.168.1.5:3080',
+          token: 'pass-b',
+          name: 'Windows',
+        ),
+      );
+
+      final profiles = await store.loadProfiles();
+      expect(profiles.length, 2);
+      expect(profiles[0].name, 'Mac mini');
+      expect(profiles[1].name, 'Windows');
+      expect(profiles[1].token, 'pass-b');
+
+      final active = await store.load();
+      expect(active, isNotNull);
+      expect(active!.name, 'Windows');
+    });
+
+    test('保存时带 id 表示编辑既有设备,不会新增重复档案', () async {
+      SharedPreferences.setMockInitialValues({});
+      FlutterSecureStorage.setMockInitialValues({});
+
+      final store = ConfigStore();
+      await store.save(
+        const AppConfig(
+          mode: ConnectionMode.public,
+          serverUrl: 'https://relay.example.com',
+          token: 'old',
+          name: 'Mac',
+        ),
+      );
+      final profiles = await store.loadProfiles();
+      final id = profiles.single.id!;
+
+      await store.save(
+        AppConfig(
+          mode: ConnectionMode.public,
+          serverUrl: 'https://relay.example.com',
+          token: 'new',
+          id: id,
+          name: 'Mac changed',
+        ),
+      );
+
+      final after = await store.loadProfiles();
+      expect(after.length, 1);
+      expect(after.single.name, 'Mac changed');
+      expect(after.single.token, 'new');
+    });
+
+    test('switchProfile 切换激活设备;load 返回对应配置', () async {
+      SharedPreferences.setMockInitialValues({});
+      FlutterSecureStorage.setMockInitialValues({});
+
+      final store = ConfigStore();
+      await store.save(
+        const AppConfig(
+          mode: ConnectionMode.public,
+          serverUrl: 'https://a.example.com',
+          token: 'a',
+          name: 'A',
+        ),
+      );
+      await store.save(
+        const AppConfig(
+          mode: ConnectionMode.public,
+          serverUrl: 'https://b.example.com',
+          token: 'b',
+          name: 'B',
+        ),
+      );
+      final profiles = await store.loadProfiles();
+      final idA = profiles.firstWhere((p) => p.name == 'A').id!;
+
+      await store.switchProfile(idA);
+      final active = await store.load();
+      expect(active!.name, 'A');
+      expect(active.token, 'a');
+    });
+
+    test('删除当前激活设备后自动切换到剩余设备;删除最后一台返回空', () async {
+      SharedPreferences.setMockInitialValues({});
+      FlutterSecureStorage.setMockInitialValues({});
+
+      final store = ConfigStore();
+      await store.save(
+        const AppConfig(
+          mode: ConnectionMode.public,
+          serverUrl: 'https://a.example.com',
+          token: 'a',
+          name: 'A',
+        ),
+      );
+      await store.save(
+        const AppConfig(
+          mode: ConnectionMode.public,
+          serverUrl: 'https://b.example.com',
+          token: 'b',
+          name: 'B',
+        ),
+      );
+      final profiles = await store.loadProfiles();
+      await store.deleteProfile(profiles.first.id!);
+
+      final rest = await store.loadProfiles();
+      expect(rest.length, 1);
+      expect(rest.single.name, 'B');
+      expect((await store.load())!.name, 'B');
+
+      await store.deleteProfile(rest.single.id!);
+      expect(await store.loadProfiles(), isEmpty);
+      expect(await store.load(), isNull);
+    });
+
+    test('clear 清空所有设备与凭据', () async {
+      SharedPreferences.setMockInitialValues({});
+      FlutterSecureStorage.setMockInitialValues({});
+
+      final store = ConfigStore();
+      await store.save(
+        const AppConfig(
+          mode: ConnectionMode.public,
+          serverUrl: 'https://a.example.com',
+          token: 'a',
+          name: 'A',
+        ),
+      );
+      await store.save(
+        const AppConfig(
+          mode: ConnectionMode.public,
+          serverUrl: 'https://b.example.com',
+          token: 'b',
+          name: 'B',
+        ),
+      );
+      await store.clear();
+      expect(await store.loadProfiles(), isEmpty);
+      expect(await store.load(), isNull);
+    });
+
+    test('旧版单设备配置自动迁移成一条设备档案', () async {
+      SharedPreferences.setMockInitialValues({
+        'server_url': 'https://relay.example.com',
+        'connection_mode': 'public',
+      });
+      FlutterSecureStorage.setMockInitialValues({'pair_token': 'legacy-pass'});
+
+      final store = ConfigStore();
+      final profiles = await store.loadProfiles();
+      expect(profiles.length, 1);
+      expect(profiles.single.serverUrl, 'https://relay.example.com');
+      expect(profiles.single.token, 'legacy-pass');
+      expect(profiles.single.id, isNotNull);
+    });
+  });
 }

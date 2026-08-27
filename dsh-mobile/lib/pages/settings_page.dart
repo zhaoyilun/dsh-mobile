@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 
 import '../config_store.dart';
+import '../system_notifications.dart';
 import '../theme.dart';
+import 'device_manager_page.dart';
 import '../widgets/connection_mode_selector.dart';
 
 /// 设置页返回结果:保存的新配置,或"已清除配置"标记。
@@ -107,6 +109,8 @@ class _SettingsPageState extends State<SettingsPage> {
       mode: _mode,
       serverUrl: serverUrl,
       token: credential,
+      id: widget.initial?.id,
+      name: widget.initial?.name,
     );
     try {
       await ConfigStore().save(config);
@@ -183,8 +187,12 @@ class _SettingsPageState extends State<SettingsPage> {
               children: [
                 if (initial != null) ...[
                   _CurrentConnectionCard(config: initial),
+                  const SizedBox(height: DshTokens.space3),
+                  _DeviceManagerEntry(config: initial),
                   const SizedBox(height: DshTokens.space5),
                 ],
+                const _NotificationCard(),
+                const SizedBox(height: DshTokens.space5),
                 Text('连接模式', style: theme.textTheme.labelLarge),
                 const SizedBox(height: DshTokens.space2),
                 ConnectionModeSelector(
@@ -319,6 +327,180 @@ class _SettingsPageState extends State<SettingsPage> {
         }
         return null;
       },
+    );
+  }
+}
+
+/// 设备管理入口:展示当前设备名,点击进入多设备列表。
+class _DeviceManagerEntry extends StatelessWidget {
+  const _DeviceManagerEntry({required this.config});
+
+  final AppConfig config;
+
+  Future<void> _open(BuildContext context) async {
+    final switched = await Navigator.of(context).push<AppConfig>(
+      MaterialPageRoute(builder: (_) => DeviceManagerPage(initial: config)),
+    );
+    if (switched == null || !context.mounted) return;
+    // 设备切换/删除后把新的激活配置带回设置页,由父级决定是否重建主页。
+    Navigator.of(context).pop(SettingsResult.saved(switched));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Material(
+      color: theme.colorScheme.surface,
+      borderRadius: BorderRadius.circular(DshTokens.radiusL),
+      child: InkWell(
+        onTap: () => _open(context),
+        borderRadius: BorderRadius.circular(DshTokens.radiusL),
+        child: Container(
+          padding: const EdgeInsets.all(DshTokens.space4),
+          decoration: BoxDecoration(
+            border: Border.all(color: theme.dividerColor),
+            borderRadius: BorderRadius.circular(DshTokens.radiusL),
+          ),
+          child: Row(
+            children: [
+              const Icon(Icons.devices_other),
+              const SizedBox(width: DshTokens.space3),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      '当前设备',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      config.displayName,
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const Icon(Icons.chevron_right),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// 系统通知诊断卡:显示权限状态,提供测试通知与打开系统设置入口。
+class _NotificationCard extends StatefulWidget {
+  const _NotificationCard();
+
+  @override
+  State<_NotificationCard> createState() => _NotificationCardState();
+}
+
+class _NotificationCardState extends State<_NotificationCard> {
+  bool? _granted;
+
+  @override
+  void initState() {
+    super.initState();
+    _refresh();
+  }
+
+  Future<void> _refresh() async {
+    final granted = await SystemNotifications.isPermissionGranted();
+    if (!mounted) {
+      return;
+    }
+    setState(() => _granted = granted);
+  }
+
+  Future<void> _sendTest() async {
+    final sent = await SystemNotifications.sendTestNotification();
+    if (!mounted) {
+      return;
+    }
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          content: Text(sent ? '测试通知已发送,请查看通知栏' : '通知发送失败,请先打开系统设置允许通知'),
+        ),
+      );
+    await _refresh();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final granted = _granted;
+    return Container(
+      padding: const EdgeInsets.all(DshTokens.space4),
+      decoration: BoxDecoration(
+        border: Border.all(color: theme.dividerColor),
+        borderRadius: BorderRadius.circular(DshTokens.radiusL),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(
+                granted == false
+                    ? Icons.notifications_off_outlined
+                    : Icons.notifications_active_outlined,
+                color: theme.colorScheme.primary,
+              ),
+              const SizedBox(width: DshTokens.space3),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('系统通知'),
+                    const SizedBox(height: 2),
+                    Text(
+                      granted == null
+                          ? '正在检查权限…'
+                          : granted
+                          ? '已授权 · 审批/提问/任务完成会进入通知栏'
+                          : '未授权 · 任务完成通知将无法显示',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: granted == false
+                            ? theme.colorScheme.error
+                            : theme.colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: DshTokens.space3),
+          Wrap(
+            spacing: DshTokens.space2,
+            runSpacing: DshTokens.space2,
+            children: [
+              OutlinedButton.icon(
+                onPressed: _sendTest,
+                icon: const Icon(Icons.notification_add_outlined),
+                label: const Text('发送测试通知'),
+              ),
+              OutlinedButton.icon(
+                onPressed: () async {
+                  await SystemNotifications.openNotificationSettings();
+                  await _refresh();
+                },
+                icon: const Icon(Icons.settings_outlined),
+                label: const Text('打开系统通知设置'),
+              ),
+            ],
+          ),
+        ],
+      ),
     );
   }
 }

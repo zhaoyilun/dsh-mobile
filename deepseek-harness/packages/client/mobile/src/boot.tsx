@@ -1,176 +1,151 @@
 /**
- * Mobile shell boot kernel — the face consumed by the apps/mobile entry,
- * mirroring the desktop kernel (`@deepseek-ai/dsh-client-web`'s boot.tsx) with
- * the mobile app-shell assembly substituted. The two-stage chain is identical
- * to the desktop shell's (module face → plugin face → settled), and it reuses
- * the desktop kernel's exported machinery verbatim — `parseBootManifest` /
- * `ClientModuleSystem` (modules), `getStaticModules` (platform table), and
- * `AppRoot` / `createSignal` / `createLoaderStatusStore` / `STATE_LABELS`
- * (loading gate). The one divergence is the shell-own assembly entry: the
- * mobile assembly (`{@link MOBILE_SHELL_ID}`) installs a renderer configured
- * to dispatch the mobile 'mobile-frame' slot instead of 'root', so the desktop
- * frame registered into 'root' stays inert — one client composition, two
- * shells.
+ * Mobile boot kernel for DSH 0.1.1+.
  *
- * Shell self-sufficiency rule (inherited from the desktop kernel): nothing
- * here value-imports a plugin package — the loading page must work while
- * (especially when) plugins fail. The one sanctioned exception is the modules
- * package (bootstrap identity), exactly as in the desktop kernel.
+ * Mirrors the official 0.1.1 web boot (`@deepseek-ai/dsh-client-web`):
+ * the host pre-installs `window.__ModuleLoader__` and `__DSH_BOOT__`; this
+ * kernel creates the client module system, runs every client entry, then
+ * mounts the mobile root slot (our MobileFrame shadows the desktop layout).
+ * The desktop-only ui-layout row is filtered out so the mobile frame can own
+ * the top-level child seats; a minimal ctx.layout face is provided by
+ * app-shell instead.
  */
 import { Context } from '@deepseek-ai/cordis'
 import Loader from '@deepseek-ai/cordis-plugin-loader'
 import { createRoot, type Root } from 'react-dom/client'
-import * as ModulesClient from '@deepseek-ai/dsh-client-modules/client'
-import {
-  ClientModuleSystem, parseBootManifest,
-  type BootManifest, type ClientModuleSystemOptions, type DshWindow,
-} from '@deepseek-ai/dsh-client-modules/client'
-import {
-  AppRoot, getStaticModules, STATE_LABELS, createLoaderStatusStore, createSignal,
-} from '@deepseek-ai/dsh-client-web'
+import type { ClientModuleCreateOptions, DshWindow } from '@deepseek-ai/dsh-client-modules/client'
+import { getStaticModules } from '@deepseek-ai/dsh-client-web'
+import { STATE_LABELS } from '@deepseek-ai/dsh-client-web/src/loader-status.ts'
 import * as MobileAppShell from './app-shell.ts'
 import { MOBILE_SHELL_ID } from './app-shell.ts'
 import './base.css'
 
-/** Module transport hook the shell passes through (jsdom tests replace the <script> path). */
-export type BootSeams = Pick<ClientModuleSystemOptions, 'loadBundle'>
+/** Module transport hook replaced by jsdom tests. */
+export type BootSeams = Pick<ClientModuleCreateOptions, 'loadBundle'>
 
-/**
- * The modules package's own graph row id — same adoption handoff as the
- * desktop kernel: the wrapper is statically registered and must be skipped by
- * the plugin-row loop (the vendored Group.create does not deduplicate by
- * name, and a second fiber would provide 'modules' twice).
- */
-const MODULES_ID = '@deepseek-ai/dsh-client-modules'
+/** Desktop layout row filtered out: the mobile frame replaces it as root. */
+const SKIPPED_CLIENT_ROWS = new Set([
+  '@deepseek-ai/dsh-client-ui-layout',
+])
 
-/**
- * The mobile shell kernel: mounts the loading page into a DOM element and runs
- * the two-stage boot over the host graph. Structurally identical to the
- * desktop AppWebEntry; the mobile assembly id is the only kernel difference.
- */
+/** Mobile shell kernel: see module doc. */
 export class AppMobileEntry {
-  private readonly el: HTMLElement
   private readonly seams: BootSeams | undefined
-  private readonly status = createLoaderStatusStore()
-  private readonly settled = createSignal(false)
-  private readonly error = createSignal<string | undefined>(undefined)
-  // Assigned by run() before any private method or settled-gated closure reads them.
-  private ctx!: Context
-  private modules!: ClientModuleSystem
-  private manifest!: BootManifest
-  private root: Root | undefined
+  private modules!: ReturnType<NonNullable<DshWindow['__ModuleLoader__']>['create']>
+  private root: Root
 
-  /**
-   * Hold the mount point; all work happens in {@link run}.
-   * @param el - mount point (the app's #root).
-   * @param seams - Optional module transport overrides for test environments.
-   */
   constructor(el: HTMLElement, seams?: BootSeams) {
-    this.el = el
     this.seams = seams
+    this.root = createRoot(el)
+    this.root.render(<div className="dsh-mobile-loading">DSH Mobile</div>)
   }
 
-  /**
-   * Run the boot chain to settlement. Boot-chain failures resolve (not
-   * reject): the loading page stays up and renders the failure report (the
-   * fail-loud surface the kernel owns). Rejects only when the boot manifest
-   * is missing or malformed — there is nothing to boot against.
-   * @returns resolves once the UI settled or the failure report rendered.
-   */
+  /** Run the two-stage boot and mount the mobile root slot. */
   async run(): Promise<void> {
-    this.manifest = parseBootManifest((globalThis as DshWindow).__DSH_BOOT__)
-
-    this.modules = new ClientModuleSystem({
-      modules: this.manifest.modules, staticModules: getStaticModules(), ...this.seams,
-    })
-    // The mobile app-shell assembly is the only shell-own module: every other
-    // graph row is a plugin bundle arriving through fetch.
-    this.modules.registerStatic(MOBILE_SHELL_ID, MobileAppShell)
-    this.modules.registerStatic(MODULES_ID, ModulesClient)
-    ;(globalThis as DshWindow).__DSH_MODULES__ = this.modules
-
-    this.root = createRoot(this.el)
-    this.root.render(
-      <AppRoot
-        settled={this.settled}
-        status={this.status}
-        error={this.error}
-        renderApp={() => {
-          const shell = this.ctx.get('appShell')
-          // Unreachable after a clean settle (the app-shell entry is in every graph).
-          if (shell === undefined) throw new Error('mobile boot: appShell service missing after settled')
-          return shell.renderApp()
-        }}
-      />,
-    )
-
-    // The immediately tier prefetches in parallel with Loader mounting (same
-    // cross-package require-edge rationale as the desktop kernel).
-    const prefetching = this.prefetchImmediateTier()
-    this.ctx = new Context()
     try {
-      await this.runPluginBoot(prefetching)
-      this.settled.set(true)
+      const win = globalThis as DshWindow
+      const moduleLoader = win.__ModuleLoader__
+      if (moduleLoader === undefined) {
+        throw new Error('mobile boot: window.__ModuleLoader__ bootstrap facade is missing')
+      }
+      // Inject the mobile app-shell as an extra graph entry. It is provided
+      // through the static module seed (not a fetched bundle), so url/rev are
+      // placeholders and resolution never reaches them.
+      const wire = win.__DSH_BOOT__ as { entries?: unknown[] } | undefined
+      if (wire == null || !Array.isArray(wire.entries)) {
+        throw new Error('mobile boot: window.__DSH_BOOT__ is missing or malformed')
+      }
+      const originalEntries = wire.entries
+      wire.entries = [
+        ...originalEntries,
+        {
+          id: MOBILE_SHELL_ID,
+          url: '',
+          rev: '0',
+          inject: ['slots', 'sessions', 'workspaces', 'locale', 'remote'],
+          external: [],
+        },
+      ]
+
+      const transport = (globalThis as {
+        __DSH_TRANSPORT__?: { loadBundle?: ClientModuleCreateOptions['loadBundle'] }
+      }).__DSH_TRANSPORT__
+      this.modules = moduleLoader.create({
+        boot: win.__DSH_BOOT__,
+        staticModules: {
+          ...getStaticModules(),
+          [MOBILE_SHELL_ID]: MobileAppShell,
+        },
+        ...transport?.loadBundle === undefined ? {} : { loadBundle: transport.loadBundle },
+        ...this.seams,
+      })
+
+      const prefetching = this.prefetchImmediateTier()
+      const ctx = new Context()
+      await this.runPluginBoot(ctx, prefetching)
+      await this.mountMobile(ctx)
     } catch (reason) {
-      // Stay on the loading page; surface the sweep report (fail loud).
       console.error(reason)
-      this.error.set(reason instanceof Error ? reason.message : String(reason))
+      const message = reason instanceof Error ? reason.message : String(reason)
+      this.root.render(
+        <div className="dsh-mobile-loading dsh-mobile-error">
+          <p>DSH Mobile 加载失败</p>
+          <pre>{message}</pre>
+        </div>,
+      )
     }
   }
 
-  /** Unmount the shell (loading page or settled UI). */
+  /** Dispose the mobile React root. */
   dispose(): void {
-    this.root?.unmount()
+    this.root.unmount()
   }
 
-  /** Prefetch the immediately tier (factory registration only; failures defer to the import path). */
+  /** Mount the mobile application: the root slot renders MobileFrame. */
+  private async mountMobile(ctx: Context): Promise<void> {
+    this.root.render(ctx.slots.renderSlot('root', {}))
+  }
+
+  /** Prefetch stage-one bundles exactly like the upstream web boot. */
   private async prefetchImmediateTier(): Promise<void> {
-    await Promise.all(this.manifest.plugins
+    const transport = (globalThis as {
+      __DSH_TRANSPORT__?: { loadBundle?: unknown }
+    }).__DSH_TRANSPORT__
+    if (transport?.loadBundle !== undefined) return
+    await Promise.all(this.modules.manifest.plugins
+      .filter(row => !SKIPPED_CLIENT_ROWS.has(row.id))
       .filter(row => row.immediately)
-      .map(row => this.modules.prefetch(row.id).catch(() => {
-        // Import reloads and reports this loudly per entry; swallowing
-        // here keeps one failing prefetch from masking the others.
+      .map(row => this.modules.prefetch(row.id).catch((_error: unknown) => {
+        // Prefetch failures are retried by the loader import path.
       })))
   }
 
-  /** Plugin face: mount the Loader, inject the `internal` contract, adopt modules, create the graph entries, settle, sweep. */
-  private async runPluginBoot(prefetching: Promise<void>): Promise<void> {
-    const ctx = this.ctx
+  /** Load all client entries (minus desktop ui-layout) and await quiescence. */
+  private async runPluginBoot(ctx: Context, prefetching: Promise<void>): Promise<void> {
     await ctx.plugin(Loader)
     const loader = ctx.loader
     loader.internal = this.modules as never
 
-    ctx.on('internal/status', (fiber) => {
-      const entry = fiber.entry
-      if (entry === undefined || entry.fiber === undefined) return
-      this.status.set(entry.options.name, STATE_LABELS[entry.fiber.state])
+    ctx.on('internal/status', () => {
+      // The mobile loading page intentionally stays minimal; no per-entry status line.
     })
 
-    // Barrier before any entry exists (same immediate-tier factory rationale
-    // as the desktop kernel).
+    const rows = this.modules.manifest.plugins
+      .filter(row => !SKIPPED_CLIENT_ROWS.has(row.id))
+      .map(row => row.id)
     await prefetching
-
-    const rows = [MODULES_ID, ...this.manifest.plugins.map(row => row.id).filter(id => id !== MODULES_ID), MOBILE_SHELL_ID]
     await Promise.all(rows.map(async (name) => {
-      this.status.set(name, 'loading')
       const id = await loader.create({ name })
       if (loader.resolve(id).fiber === undefined) {
-        this.status.set(name, 'failed')
+        // Marked by the upstream assert below.
       }
     }))
 
     await loader.await()
-    this.assertEntriesActive()
+    this.assertEntriesActive(ctx)
   }
 
-  /**
-   * Sweep every loader entry after the tree quiesced: an entry without a
-   * fiber failed its import; a fiber not ACTIVE is FAILED (apply threw) or
-   * PENDING (a required service never arrived — cordis inject waiting has no
-   * timeout, so this sweep is the fail-loud compensation).
-   */
-  private assertEntriesActive(): void {
-    const ctx = this.ctx
+  /** Same fail-loud activation audit as the upstream web boot. */
+  private assertEntriesActive(ctx: Context): void {
     const failures: string[] = []
     for (const entry of ctx.loader.entries()) {
       const name = entry.options.name
@@ -182,13 +157,13 @@ export class AppMobileEntry {
       if (state === 'active') continue
       if (state === 'pending') {
         const missing = Object.keys(entry.fiber.inject).filter(service => ctx.get(service) === undefined)
-        failures.push(`${name}: pending (waiting for service${missing.length === 1 ? '' : 's'}: ${missing.join(', ') || 'unknown'})`)
+        failures.push(`${name}: pending (waiting for services: ${missing.join(', ') || 'unknown'})`)
       } else {
         failures.push(`${name}: ${state}`)
       }
     }
     if (failures.length > 0) {
-      throw new Error(`mobile boot: ${String(failures.length)} entr${failures.length === 1 ? 'y' : 'ies'} did not activate\n${failures.join('\n')}`)
+      throw new Error(`mobile boot: ${failures.length} entries did not activate\n${failures.join('\n')}`)
     }
   }
 }

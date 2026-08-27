@@ -4,7 +4,7 @@
  * and goal pages, and about/version. Server and phone-pass editing remain in
  * the Flutter shell's own Settings page (the shell owns credentials).
  */
-import type { SessionListState } from '@deepseek-ai/dsh-client-runtime/client'
+import type { SessionListState, WorkspaceListState } from '@deepseek-ai/dsh-client-runtime/client'
 import type { SnapshotSelectorHook } from '@deepseek-ai/dsh-client-ui-slots'
 import type { MobileFrameInjected } from '../../app-shell.ts'
 import { PageBackBar } from '../PageBackBar.tsx'
@@ -18,7 +18,7 @@ declare global {
 /** Props: sessions, workspaces, plan/goal navigation, and the back callback. */
 export interface SettingsPageProps {
   useSessions: SnapshotSelectorHook<SessionListState>
-  workspaces: MobileFrameInjected['workspaces']
+  useWorkspaces: SnapshotSelectorHook<WorkspaceListState>
   onOpenPlan: () => void
   onOpenGoal: () => void
   onBack: () => void
@@ -27,7 +27,7 @@ export interface SettingsPageProps {
 /** The mobile settings page (see module doc). */
 export function SettingsPage({
   useSessions,
-  workspaces,
+  useWorkspaces,
   onOpenPlan,
   onOpenGoal,
   onBack,
@@ -36,7 +36,7 @@ export function SettingsPage({
   const currentSession = useSessions(state => state.current)
   const sessionTitle = useSessions(state =>
     state.current === undefined ? undefined : state.byId[state.current]?.displayTitle)
-  const workspace = workspaces.useWorkspaces(state => {
+  const workspace = useWorkspaces(state => {
     if (currentSession === undefined) return undefined
     return state.items.find(item => item.sessionIds.includes(currentSession))
   })
@@ -50,6 +50,10 @@ export function SettingsPage({
           <span className={css.rowValue} data-connected={connected || undefined}>
             {connected ? '已连接' : '连接中…'}
           </span>
+        </div>
+        <div className={css.row}>
+          <span className={css.rowLabel}>当前设备</span>
+          <span className={css.rowValue}>{(globalThis as { __DSH_DEVICE__?: string }).__DSH_DEVICE__ ?? '手机'}</span>
         </div>
         <div className={css.row}>
           <span className={css.rowLabel}>服务器</span>
@@ -89,6 +93,17 @@ export function SettingsPage({
           <span className={css.rowLabel}>版本</span>
           <span className={css.rowValue}>DSH Mobile</span>
         </div>
+        <button
+          type="button"
+          className={css.action}
+          onClick={() => { globalThis.DshShell?.postMessage('openDevices') }}
+        >
+          <span className={css.actionText}>
+            <span className={css.actionTitle}>设备管理</span>
+            <span className={css.actionHint}>切换 Mac / Windows / Linux 设备</span>
+          </span>
+          <span className={css.chevron}>›</span>
+        </button>
         <button
           type="button"
           className={css.action}

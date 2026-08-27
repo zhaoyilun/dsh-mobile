@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:webview_flutter/webview_flutter.dart';
@@ -10,6 +11,7 @@ import '../retry_schedule.dart';
 import '../system_notifications.dart';
 import '../theme.dart';
 import '../widgets/dsh_brand_mark.dart';
+import 'device_manager_page.dart';
 import 'settings_page.dart';
 
 /// WebView 连接状态,驱动 AppBar 状态指示。
@@ -90,6 +92,9 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     WidgetsBinding.instance.addObserver(this);
     // Android 前台保活服务:切后台后进程不会被轻易回收,WebSocket 与
     // WebView 通知桥可以继续工作。
+    // Activity 已可见后再请求通知权限,避免过早弹窗导致系统未展示;
+    // v2 偏好键保证这次会重新询问一次(已授权则直接跳过)。
+    unawaited(SystemNotifications.requestPermission());
     unawaited(SystemNotifications.startKeepAlive());
     _initController();
   }
@@ -116,6 +121,10 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         onMessageReceived: (message) {
           if (message.message == 'openSettings') {
             unawaited(_openSettings());
+          } else if (message.message == 'refresh') {
+            unawaited(_forceRefresh());
+          } else if (message.message == 'openDevices') {
+            unawaited(_openDeviceManager());
           }
         },
       )
@@ -149,6 +158,11 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
             if (_inErrorOverlay || !mounted) {
               return;
             }
+            // 兜底:个别 WebView 实现不回调 onHttpError;若页面正文正好是
+            // 中继返回的 "unauthorized",也触发一次配对回退。
+            unawaited(_inspectAuthPage(url));
+            // 把当前设备名注入 WebView,移动 Web 设置页可以显示「当前设备」。
+            unawaited(_injectDeviceMeta());
             // 重连等待期间的 finish 往往是失败页/错误页的 finish,不能据此
             // 清零重试预算或取消定时器;否则一次失败会被重复当作「第一次」。
             if (_status == _ConnStatus.reconnecting) {
@@ -236,15 +250,19 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     if (!mounted || _inErrorOverlay) {
       return;
     }
-    if (_pairingFallback) {
-      return;
-    }
     final doc = _documentUrl;
+    // 先判断当前文档是否就是配对 URL:如果配对 URL 自己返回 401/403,
+    // 说明口令/令牌错误,必须在这里终止并把错误页显示出来,否则 WebView
+    // 会停留在服务器返回的 unauthorized 文本页上。
     if (_urlHasCredential(doc)) {
+      _pairingFallback = false;
       setState(() {
         _status = _ConnStatus.error;
         _errorMessage = '配对失败:手机口令或配对令牌不正确';
       });
+      return;
+    }
+    if (_pairingFallback) {
       return;
     }
     _pairingFallback = true;
@@ -254,6 +272,57 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         _onLoadFailed('无法发起配对');
       }
     });
+  }
+
+  Future<void> _inspectAuthPage(String url) async {
+    if (_urlHasCredential(url)) {
+      return;
+    }
+    try {
+      final body = await _controller.runJavaScriptReturningResult(
+        'document.body ? document.body.innerText.trim() : ""',
+      );
+      if (body == '"unauthorized"' || body == "'unauthorized'") {
+        _onAuthRequired();
+      }
+    } catch (_) {
+      // 页面尚未就绪或 JS 被禁用时不处理;onHttpError 路径仍是主通道。
+    }
+  }
+
+  /// 将当前设备名称注入移动 Web 页面(window.__DSH_DEVICE__),
+  /// 供设置页展示;不在 URL 或日志里携带任何凭据。
+  Future<void> _injectDeviceMeta() async {
+    try {
+      await _controller.runJavaScript(
+        'window.__DSH_DEVICE__ = ${jsonEncode(widget.config.displayName)}',
+      );
+    } catch (_) {
+      // 注入失败不影响主流程;Web 端会退化为只显示服务器地址。
+    }
+  }
+
+  /// 移动 Web 顶部「强制刷新」按钮:清 HTTP 缓存后重新加载 /m/,
+  /// 不清 cookie(保持登录),也不清 localStorage(尽量少丢本地状态)。
+  Future<void> _forceRefresh() async {
+    if (!mounted) {
+      return;
+    }
+    if (_inErrorOverlay) {
+      unawaited(_retryManually());
+      return;
+    }
+    _retryTimer?.cancel();
+    _retryTimer = null;
+    setState(() => _status = _ConnStatus.loading);
+    try {
+      await _controller.clearCache();
+      await _controller.loadRequest(buildMobileUrl(widget.config));
+    } catch (_) {
+      if (mounted) {
+        _onLoadFailed('强制刷新失败');
+      }
+    }
   }
 
   /// 后台停留超过阈值后回前台:reload 当前 /m/ 页面,让 SPA 重新拉取
@@ -375,6 +444,17 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     try {
       await WebViewCookieManager().clearCookies();
     } catch (_) {}
+  }
+
+  /// 从移动 Web 设置页直接打开「设备管理」;切换后立即重建主页。
+  Future<void> _openDeviceManager() async {
+    final switched = await Navigator.of(context).push<AppConfig>(
+      MaterialPageRoute(
+        builder: (_) => DeviceManagerPage(initial: widget.config),
+      ),
+    );
+    if (switched == null || !mounted) return;
+    widget.onConfigChanged(switched);
   }
 
   Future<void> _openSettings() async {

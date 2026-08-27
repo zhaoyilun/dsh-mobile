@@ -30,10 +30,10 @@
   flex-direction: column;
 }
 
-.floatingMenu {
+.floatingMenu,
+.floatingRefresh {
   position: absolute;
   top: calc(env(safe-area-inset-top, 0px) + 8px);
-  left: 8px;
   z-index: 20;
   display: inline-flex;
   align-items: center;
@@ -48,6 +48,14 @@
   line-height: 20px;
   cursor: pointer;
   backdrop-filter: blur(8px);
+}
+
+.floatingMenu {
+  left: 8px;
+}
+
+.floatingRefresh {
+  left: 52px;
 }
 
 /* Empty home (no current session): centered hint + a button opening the drawer. */
