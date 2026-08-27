@@ -154,14 +154,14 @@ class MainActivity : FlutterActivity() {
             result.success(emptyList<String>())
             return
         }
-        val uris = mutableListOf<String>()
+        val uris = linkedSetOf<String>()
         data.clipData?.let { clip ->
             for (index in 0 until clip.itemCount) {
                 clip.getItemAt(index)?.uri?.let { uris.add(it.toString()) }
             }
         }
         data.data?.let { uris.add(it.toString()) }
-        result.success(uris)
+        result.success(uris.toList())
     }
 
     private fun showNotification(
