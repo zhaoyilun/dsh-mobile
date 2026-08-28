@@ -27,16 +27,50 @@ const SKIPPED_CLIENT_ROWS = new Set([
   '@deepseek-ai/dsh-client-ui-layout',
 ])
 
+/** Boot timeout: a remote/slow relay should never leave a blank screen forever. */
+const BOOT_TIMEOUT_MS = 30_000
+
+/** Render the centered splash (also used before the timeout). */
+function renderSplash(root: Root): void {
+  root.render(
+    <div className="dsh-mobile-screen dsh-mobile-splash" data-dsh-boot>
+      <div className="dsh-mobile-splashLogo">DSH</div>
+      <p className="dsh-mobile-splashTitle">Mobile</p>
+      <div className="dsh-mobile-spinner" aria-label="加载中" />
+    </div>,
+  )
+}
+
+/** Render a recoverable error screen with a manual reload action. */
+function renderBootError(root: Root, message: string): void {
+  root.render(
+    <div className="dsh-mobile-screen dsh-mobile-error">
+      <div className="dsh-mobile-splashLogo">DSH</div>
+      <p className="dsh-mobile-errorTitle">移动端加载失败</p>
+      <pre className="dsh-mobile-errorMessage">{message}</pre>
+      <button
+        type="button"
+        className="dsh-mobile-retry"
+        onClick={() => { globalThis.location.reload() }}
+      >
+        重新加载
+      </button>
+    </div>,
+  )
+}
+
 /** Mobile shell kernel: see module doc. */
 export class AppMobileEntry {
   private readonly seams: BootSeams | undefined
   private modules!: ReturnType<NonNullable<DshWindow['__ModuleLoader__']>['create']>
   private root: Root
+  private bootSettled = false
+  private bootTimer: number | undefined
 
   constructor(el: HTMLElement, seams?: BootSeams) {
     this.seams = seams
     this.root = createRoot(el)
-    this.root.render(<div className="dsh-mobile-loading">DSH Mobile</div>)
+    renderSplash(this.root)
   }
 
   /** Run the two-stage boot and mount the mobile root slot. */
@@ -79,24 +113,35 @@ export class AppMobileEntry {
         ...this.seams,
       })
 
+      // Fail-loud timeout: if a relay/network stall leaves plugin boot
+      // pending, show a recoverable error instead of an endless white screen.
+      this.bootTimer = globalThis.setTimeout(() => {
+        if (!this.bootSettled) {
+          renderBootError(this.root, '启动超时（30 秒），请检查网络后重新加载。')
+        }
+      }, BOOT_TIMEOUT_MS)
+
       const prefetching = this.prefetchImmediateTier()
       const ctx = new Context()
       await this.runPluginBoot(ctx, prefetching)
+      clearTimeout(this.bootTimer)
+      this.bootTimer = undefined
       await this.mountMobile(ctx)
+      this.bootSettled = true
     } catch (reason) {
       console.error(reason)
       const message = reason instanceof Error ? reason.message : String(reason)
-      this.root.render(
-        <div className="dsh-mobile-loading dsh-mobile-error">
-          <p>DSH Mobile 加载失败</p>
-          <pre>{message}</pre>
-        </div>,
-      )
+      if (this.bootTimer !== undefined) {
+        clearTimeout(this.bootTimer)
+        this.bootTimer = undefined
+      }
+      renderBootError(this.root, message)
     }
   }
 
   /** Dispose the mobile React root. */
   dispose(): void {
+    if (this.bootTimer !== undefined) clearTimeout(this.bootTimer)
     this.root.unmount()
   }
 
