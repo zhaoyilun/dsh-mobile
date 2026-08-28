@@ -211,13 +211,14 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
             }
           },
         ),
-      )
-      ..loadRequest(initialUrl);
+      );
     // Android WebView 需要显式允许文件选择器,否则 `<input type=file>`
-    // 点击后不会弹出系统相册/文件选择器,图片无法上传。
+    // 点击后不会弹出系统相册/文件选择器,图片无法上传。在 load 前配置,
+    // 避免用户进入会话后快速点击时回调尚未就绪。
     if (Platform.isAndroid) {
       unawaited(_configureAndroidFileSelector());
     }
+    _controller.loadRequest(initialUrl);
   }
 
   /// 加载失败统一入口:还有剩余自动重试 → 排程重连;耗尽 → 错误页。
