@@ -30,11 +30,8 @@ jobs:
           tar czf dsh-mobile-linux-x64.tgz -C build/linux/x64/release bundle
       - name: Build .deb (Kylin/Ubuntu)
         run: |
-          mkdir -p deb/usr/bin deb/DEBIAN
-          cp -r build/linux/x64/release/bundle deb/opt/dsh-mobile
-          printf '%s\n' '[Desktop Entry]' 'Name=DSH Mobile' 'Comment=DSH federation client' 'Exec=/opt/dsh-mobile/dsh-mobile' 'Terminal=false' 'Type=Application' > deb/usr/share/applications/dsh-mobile.desktop 2>/dev/null || true
-          sed -i 's#usr/bin#usr/share/applications#' deb/usr/share/applications/dsh-mobile.desktop 2>/dev/null || true
-          mkdir -p deb/usr/share/applications
+          mkdir -p deb/opt/dsh-mobile deb/usr/share/applications deb/DEBIAN
+          cp -r build/linux/x64/release/bundle/. deb/opt/dsh-mobile/
           printf '%s\n' '[Desktop Entry]' 'Name=DSH Mobile' 'Comment=DSH federation client' 'Exec=/opt/dsh-mobile/dsh-mobile' 'Terminal=false' 'Type=Application' > deb/usr/share/applications/dsh-mobile.desktop
           printf 'Package: dsh-mobile\nVersion: 1.0.0\nArchitecture: amd64\nMaintainer: yourname <yourname@example.com>\nSection: net\nPriority: optional\nDescription: DSH mobile federation client (Linux desktop)\n' > deb/DEBIAN/control
           printf '#!/bin/sh\nset -e\n' > deb/DEBIAN/postinst
