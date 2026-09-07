@@ -1,0 +1,49 @@
+name: linux-build
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build-linux:
+    # 麒麟（Ubuntu 22.04 系）同基线：glibc 2.35 / GTK3——编译产物可直接在 Kylin V10+ 运行
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: '3.32.4'
+      - name: Install Linux desktop toolchain
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ninja-build libgtk-3-dev clang cmake pkg-config liblzma-dev
+      - name: Flutter pub get
+        run: flutter pub get
+      - name: Enable and build Linux desktop
+        run: |
+          flutter config --enable-linux-desktop
+          flutter build linux --release
+      - name: Package tar.gz
+        run: |
+          tar czf dsh-mobile-linux-x64.tgz -C build/linux/x64/release bundle
+      - name: Build .deb (Kylin/Ubuntu)
+        run: |
+          mkdir -p deb/usr/bin deb/DEBIAN
+          cp -r build/linux/x64/release/bundle deb/opt/dsh-mobile
+          printf '%s\n' '[Desktop Entry]' 'Name=DSH Mobile' 'Comment=DSH federation client' 'Exec=/opt/dsh-mobile/dsh-mobile' 'Terminal=false' 'Type=Application' > deb/usr/share/applications/dsh-mobile.desktop 2>/dev/null || true
+          sed -i 's#usr/bin#usr/share/applications#' deb/usr/share/applications/dsh-mobile.desktop 2>/dev/null || true
+          mkdir -p deb/usr/share/applications
+          printf '%s\n' '[Desktop Entry]' 'Name=DSH Mobile' 'Comment=DSH federation client' 'Exec=/opt/dsh-mobile/dsh-mobile' 'Terminal=false' 'Type=Application' > deb/usr/share/applications/dsh-mobile.desktop
+          printf 'Package: dsh-mobile\nVersion: 1.0.0\nArchitecture: amd64\nMaintainer: yourname <yourname@example.com>\nSection: net\nPriority: optional\nDescription: DSH mobile federation client (Linux desktop)\n' > deb/DEBIAN/control
+          printf '#!/bin/sh\nset -e\n' > deb/DEBIAN/postinst
+          printf 'update-desktop-database /usr/share/applications 2>/dev/null || true\n' >> deb/DEBIAN/postinst
+          chmod 755 deb/DEBIAN/postinst
+          dpkg-deb --build --root-owner-group deb dsh-mobile_1.0.0_amd64.deb
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dsh-mobile-linux-x64
+          path: |
+            dsh-mobile-linux-x64.tgz
+            dsh-mobile_1.0.0_amd64.deb
