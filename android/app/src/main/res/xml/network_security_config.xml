@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  DSH 网络安全配置。
+
+  控制面（registry HTTPS / MQTT WSS / host API HTTPS）全部走 TLS；
+  唯一的明文消费者是文件数据面的局域网直连（http://192.168.x.x，地址由
+  files.claim 取件单动态下发，无法用 domain-config 枚举），因此 base-config
+  仍放开 cleartext。若文件数据面迁到公网 TLS，应立即改为 false。
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system"/>
+        </trust-anchors>
+    </base-config>
+</network-security-config>

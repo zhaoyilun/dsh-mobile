@@ -1,0 +1,31 @@
+name: windows-build
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    # Windows 云端机器自己干活：构建桌面 exe + Android APK
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: '3.32.4'
+      - name: Flutter pub get
+        run: flutter pub get
+      - name: Build Windows desktop
+        run: flutter build windows --release
+      - name: Build Android APK
+        run: flutter build apk --release
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dsh-mobile-windows
+          path: build/windows/x64/runner/Release/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dsh-mobile-android-apk
+          path: build/app/outputs/flutter-apk/app-release.apk
